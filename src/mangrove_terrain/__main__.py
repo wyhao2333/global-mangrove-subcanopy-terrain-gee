@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from . import aggregate_samples, export_samples, inspect_gee, modeling_placeholder, prepare_gmw
+from .config import ensure_output_dirs, load_config
+
+
+def _years(value: str) -> list[int]:
+    if "-" in value:
+        start, end = value.split("-", 1)
+        return list(range(int(start), int(end) + 1))
+    return [int(v) for v in value.split(",") if v.strip()]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="mangrove_terrain",
+        description="全球红树林 GEDI + AlphaEarth 数据制备流程",
+    )
+    parser.add_argument("--config", default="config.yaml", help="配置文件路径，默认 config.yaml")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("inspect-gee", help="检查 GEE 登录和数据集可访问性")
+
+    p_prepare = sub.add_parser("prepare-gmw", help="切分 GMW 2020 红树林面")
+    p_prepare.add_argument("--all", action="store_true", help="全量切分；不加时默认只生成 5 个 smoke-test shards")
+    p_prepare.add_argument("--max-shards", type=int, default=None, help="最多生成多少个 shards")
+
+    p_sample = sub.add_parser("sample", help="采样 GEDI + AlphaEarth")
+    p_sample.add_argument("--mode", choices=["local", "drive"], default=None, help="local 小样本下载；drive 正式提交导出任务")
+    p_sample.add_argument("--max-shards", type=int, default=None, help="最多处理多少个 shards")
+    p_sample.add_argument("--years", type=_years, default=None, help="年份，例如 2020 或 2019-2025")
+    p_sample.add_argument("--smoke", action="store_true", help="小样本测试：1 个 shard + 2020 + 本地下载")
+
+    p_agg = sub.add_parser("aggregate", help="本地按 AlphaEarth 10 m 像元聚合 GEDI 高程")
+    p_agg.add_argument("--input-dir", default=None, help="原始 CSV/Parquet 所在目录")
+    p_agg.add_argument("--output", default=None, help="输出 parquet 路径")
+
+    sub.add_parser("model-placeholder", help="显示建模占位说明")
+
+    args = parser.parse_args()
+    cfg = load_config(args.config)
+    ensure_output_dirs(cfg)
+
+    if args.command == "inspect-gee":
+        inspect_gee.run(cfg)
+    elif args.command == "prepare-gmw":
+        prepare_gmw.run(cfg, all_shards=args.all, max_shards=args.max_shards)
+    elif args.command == "sample":
+        export_samples.run(cfg, mode=args.mode, max_shards=args.max_shards, years=args.years, smoke=args.smoke)
+    elif args.command == "aggregate":
+        aggregate_samples.run(cfg, input_dir=args.input_dir, output_path=args.output)
+    elif args.command == "model-placeholder":
+        modeling_placeholder.run()
+
+
+if __name__ == "__main__":
+    main()
