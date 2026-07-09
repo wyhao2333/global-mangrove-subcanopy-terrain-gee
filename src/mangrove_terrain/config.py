@@ -29,7 +29,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "training_dir": "outputs/training",
         "log_dir": "logs",
     },
-    "gmw": {"max_geojson_mb": 0.8, "read_batch_features": 500},
+    "gmw": {"max_geojson_mb": 2.0, "read_batch_features": 500},
     "sampling": {
         "export_mode": "drive",
         "drive_folder": "mangrove_gedi_alphaearth_samples",
@@ -37,6 +37,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "local_row_limit": 5000,
         "max_new_tasks": 20,
         "skip_existing_tasks": True,
+        "year_mode": "all",
     },
     "aggregation": {"min_elev_count": 1, "preview_csv_rows": 10000},
 }
