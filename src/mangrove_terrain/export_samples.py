@@ -82,6 +82,11 @@ def run(
         shard_df = shard_df.head(1)
         mode = "local"
         years = years or [2020]
+    elif max_shards is None and len(shard_df) < 10:
+        raise RuntimeError(
+            "当前 shard 索引数量很少，可能还是小样本测试索引。"
+            "正式全量采样前请先双击 run_02_prepare_gmw.bat，或运行 prepare-gmw --all。"
+        )
 
     export_mode = mode or cfg["sampling"].get("export_mode", "drive")
     tile_scale = int(cfg["sampling"].get("tile_scale", 8))
