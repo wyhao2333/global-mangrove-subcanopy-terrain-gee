@@ -180,6 +180,11 @@ data/shards/*.geojson
 - 只跑 2020 年。
 - 把 GEDI + AlphaEarth 小样本直接下载到本地。
 
+注意：
+
+- 这一步只是连通性测试，样本数会很少，不能代表全球红树林 2019-2025 年全量 GEDI 样本量。
+- 小样本行数少通常是因为 shard 很小、只取 2020 年、且只保留 `quality_flag == 1`、`degrade_flag == 0` 的有效 GEDI 像元。
+
 成功后会生成：
 
 ```text
@@ -203,6 +208,7 @@ logs/sample_tasks_*.csv
 - 正式提交全量采样任务。
 - 默认按 shard + year 分批提交。
 - 默认导出到 Google Drive，而不是一次性拉回本地。
+- GEDI 会按每张月度影像分别采样后合并，不做 mosaic、不做同位置去重；同一 25 m 或 10 m 位置跨月份重复出现会保留下来。
 
 为什么全量默认导出到 Google Drive：
 
@@ -451,4 +457,3 @@ outputs/raw_samples/
 - GEE 凭证
 - 全量采样 CSV
 - 训练表 parquet
-

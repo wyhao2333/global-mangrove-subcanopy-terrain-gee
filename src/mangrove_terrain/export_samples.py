@@ -77,6 +77,9 @@ def run(
     submitted = 0
     console.rule("GEDI + AlphaEarth 采样")
     console.print(f"export_mode: {export_mode}; shards: {len(shard_df)}; years: {years}")
+    console.print("GEDI 处理方式：逐张月度影像采样后 flatten 合并；不 mosaic、不按位置去重。")
+    if smoke:
+        console.print("[yellow]当前是 smoke test：只跑 1 个很小 shard + 2020 年，本结果不代表全量样本数。[/yellow]")
 
     for row in tqdm(shard_df.itertuples(index=False), total=len(shard_df), desc="采样 shards"):
         shard_id = str(row.shard_id)
