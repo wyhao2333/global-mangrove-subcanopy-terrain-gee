@@ -9,6 +9,6 @@ if not exist ".venv\Scripts\python.exe" (
 )
 set PYTHONPATH=%~dp0src
 echo This submits Google Drive export tasks. Default max_new_tasks is controlled in config.yaml.
-".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml sample --mode drive --years 2019-2025
+".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml sample --mode drive --years 2019-2025 --year-mode all
 echo.
 pause
