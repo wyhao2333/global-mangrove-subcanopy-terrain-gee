@@ -20,8 +20,9 @@ paths:
   log_dir: logs
 
 gmw:
-  # 单个 GeoJSON shard 太大会导致 GEE/代理断连。0.8 MB 是保守默认值。
-  max_geojson_mb: 0.8
+  # 单个 GeoJSON shard 太大会导致 GEE/代理断连。2.0 MB 已经过真实 GEE 全期导出测试。
+  # 如果个别区域失败，可降到 1.5 或 0.8 后重新切分 GMW。
+  max_geojson_mb: 2.0
   read_batch_features: 500
 
 sampling:
@@ -32,6 +33,8 @@ sampling:
   local_row_limit: 5000
   max_new_tasks: 20
   skip_existing_tasks: true
+  # all = 一个 shard 导出 2019-2025 全部 GEDI 月度观测；annual = 按年拆分作为失败回退。
+  year_mode: all
 
 aggregation:
   min_elev_count: 1
