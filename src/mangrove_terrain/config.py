@@ -36,6 +36,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "tile_scale": 8,
         "local_row_limit": 5000,
         "max_new_tasks": 20,
+        "skip_existing_tasks": True,
     },
     "aggregation": {"min_elev_count": 1, "preview_csv_rows": 10000},
 }
