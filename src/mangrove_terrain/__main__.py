@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
+import sys
 
 from . import aggregate_samples, export_samples, inspect_gee, modeling_placeholder, prepare_gmw
 from .config import ensure_output_dirs, load_config
@@ -32,6 +32,7 @@ def main() -> None:
     p_sample.add_argument("--mode", choices=["local", "drive"], default=None, help="local 小样本下载；drive 正式提交导出任务")
     p_sample.add_argument("--max-shards", type=int, default=None, help="最多处理多少个 shards")
     p_sample.add_argument("--years", type=_years, default=None, help="年份，例如 2020 或 2019-2025")
+    p_sample.add_argument("--year-mode", choices=["all", "annual"], default=None, help="all: 一个 shard 导出全部年份；annual: 按年拆分")
     p_sample.add_argument("--smoke", action="store_true", help="小样本测试：1 个 shard + 2020 + 本地下载")
 
     p_agg = sub.add_parser("aggregate", help="本地按 AlphaEarth 10 m 像元聚合 GEDI 高程")
@@ -44,16 +45,27 @@ def main() -> None:
     cfg = load_config(args.config)
     ensure_output_dirs(cfg)
 
-    if args.command == "inspect-gee":
-        inspect_gee.run(cfg)
-    elif args.command == "prepare-gmw":
-        prepare_gmw.run(cfg, all_shards=args.all, max_shards=args.max_shards)
-    elif args.command == "sample":
-        export_samples.run(cfg, mode=args.mode, max_shards=args.max_shards, years=args.years, smoke=args.smoke)
-    elif args.command == "aggregate":
-        aggregate_samples.run(cfg, input_dir=args.input_dir, output_path=args.output)
-    elif args.command == "model-placeholder":
-        modeling_placeholder.run()
+    try:
+        if args.command == "inspect-gee":
+            inspect_gee.run(cfg)
+        elif args.command == "prepare-gmw":
+            prepare_gmw.run(cfg, all_shards=args.all, max_shards=args.max_shards)
+        elif args.command == "sample":
+            export_samples.run(
+                cfg,
+                mode=args.mode,
+                max_shards=args.max_shards,
+                years=args.years,
+                year_mode=args.year_mode,
+                smoke=args.smoke,
+            )
+        elif args.command == "aggregate":
+            aggregate_samples.run(cfg, input_dir=args.input_dir, output_path=args.output)
+        elif args.command == "model-placeholder":
+            modeling_placeholder.run()
+    except Exception as exc:
+        print(f"\n错误：{exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":
