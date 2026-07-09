@@ -14,6 +14,9 @@ data/raw/*
 data/raw/gmw_v3/*
 data/shards/*
 data/index/*
+data/shards_test/
+data/index_test/
+data/index_test_*/
 outputs/*
 outputs/raw_samples/*
 outputs/training/*
