@@ -56,6 +56,19 @@ python --version
 data/raw/gmw_v3/
 ```
 
+也就是说，放完之后项目文件夹里应该能看到：
+
+```text
+global-mangrove-subcanopy-terrain-gee/
+  data/
+    raw/
+      gmw_v3/
+        gmw_v3_2020_vec.shp
+        gmw_v3_2020_vec.shx
+        gmw_v3_2020_vec.dbf
+        gmw_v3_2020_vec.prj
+```
+
 至少需要这 4 个文件：
 
 ```text
@@ -150,7 +163,7 @@ paths:
 - 读取 GMW 2020 shp。
 - 不用 GeoPandas。
 - 把全球红树林碎面切成很多小 GeoJSON shards。
-- 每个 shard 控制在 0.8 MB 左右，避免 GEE 请求过大。
+- 每个 shard 默认控制在 2.0 MB 左右，避免 GEE 请求过大，同时减少导出文件数。
 
 大概多久：
 
@@ -205,33 +218,43 @@ logs/sample_tasks_*.csv
 
 作用：
 
-- 提交 1 个真实 `shard-year` 到 Google Drive。
+- 提交 1 个真实 `shard-year_window` 到 Google Drive。
 - 用来测试当前 GMW 分块大小是否能被 GEE 正常接收和执行。
-- 默认使用第 1 个 shard 的 2020 年，属于正式 Drive 导出任务，不是本地 `getInfo` 小样本。
+- 默认使用第 1 个 shard 的 2019-2025 全部 GEDI 月度观测，属于正式 Drive 导出任务，不是本地 `getInfo` 小样本。
 
 什么时候需要看这一步：
 
 - 第一次换电脑、换 GEE project、换 GMW 数据或调整 `gmw.max_geojson_mb` 后，建议先跑这一步。
-- 如果这个任务失败，可以把 `config.yaml` 里的 `gmw.max_geojson_mb` 从 `0.8` 降到 `0.5`，重新运行 `run_02_prepare_gmw.bat` 后再测试。
+- 如果这个任务失败，可以把 `config.yaml` 里的 `gmw.max_geojson_mb` 从 `2.0` 降到 `1.5` 或 `0.8`，重新运行 `run_02_prepare_gmw.bat` 后再测试。
 
 本项目当前实测：
 
-- `max_geojson_mb = 0.8` 时，一个约 758 KB 的真实 GMW shard-year 任务可以成功提交并完成。
+- 约 0.76 MB 的真实 GMW shard，2019-2025 全期任务已完成，用时约 48.8 分钟。
+- 约 1.53 MB 的真实 GMW shard，2019-2025 全期任务已完成，用时约 38.0 分钟。
+- 约 2.02 MB 的真实 GMW shard，2019-2025 全期任务已完成，用时约 32.2 分钟。
+- 约 3.05 MB 的真实 GMW shard 可以提交，但 31 分钟后仍未明显推进，已取消；暂不作为默认值。
 
 可以重复运行吗：
 
-- 可以。默认会读取日志并跳过已经提交过的同一 shard-year。
+- 可以。默认会读取日志并跳过已经提交过的同一 shard-year_window。
 
 ### 7. 双击 `run_04_sample_all.bat`
 
 作用：
 
 - 正式提交全量采样任务。
-- 默认按 shard + year 分批提交。
+- 默认按 shard 分批提交，每个 shard 导出 2019-2025 全部 GEDI 月度观测。
 - 默认导出到 Google Drive，而不是一次性拉回本地。
 - GEDI 会按每张月度影像分别采样后合并，不做 mosaic、不做同位置去重；同一 25 m 或 10 m 位置跨月份重复出现会保留下来。
-- 默认每次最多新提交 `max_new_tasks` 个任务；重复运行时会读取 `logs/sample_tasks_*.csv`，已经登记过的 shard-year 会自动跳过。
+- 默认每次最多新提交 `max_new_tasks` 个任务；重复运行时会读取 `logs/sample_tasks_*.csv`，已经登记过的 shard-year_window 会自动跳过。
 - 正式运行前必须先完成 `run_02_prepare_gmw.bat` 的全量切分；如果索引里只有几个 smoke shards，程序会直接报错提醒。
+
+当前文件数估算：
+
+- `max_geojson_mb = 2.0` 时，全量约 `2,200-2,300` 个 CSV。
+- `max_geojson_mb = 0.8` 时，全量约 `3,800-3,900` 个 CSV。
+- 如果按旧方案 `shard × year` 拆分，会变成约 `26,000+` 个 CSV，因此现在默认不再按年拆。
+- 如果个别 2.0 MB shard 失败，可降到 `1.5`，全量约 `2,600` 个 CSV；再不稳则降到 `0.8`。
 
 为什么全量默认导出到 Google Drive：
 
@@ -259,7 +282,7 @@ outputs/raw_samples/
 
 可以重复运行吗：
 
-- 可以。默认 `skip_existing_tasks: true`，已提交或已下载的 shard-year 会跳过。
+- 可以。默认 `skip_existing_tasks: true`，已提交或已下载的 shard-year_window 会跳过。
 - 不要删除 `logs/sample_tasks_*.csv`，这些日志是断点续跑和防止重复提交的依据。
 
 默认每次最多提交 `20` 个新任务，避免一下子提交太多。  
@@ -269,11 +292,6 @@ outputs/raw_samples/
 sampling:
   max_new_tasks: 20
 ```
-
-可以重复运行吗：
-
-- 可以，但要注意不要重复提交同一批 shard/year。
-- 每次提交情况会记录在 `logs/sample_tasks_*.csv`。
 
 ### 8. 双击 `run_05_aggregate.bat`
 
@@ -363,13 +381,19 @@ powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
 ### 提交一块正式 Drive 测试任务
 
 ```powershell
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --mode drive --max-shards 1 --years 2020
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --mode drive --max-shards 1 --years 2019-2025 --year-mode all
 ```
 
 ### 提交全量采样任务
 
 ```powershell
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --mode drive --years 2019-2025
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --mode drive --years 2019-2025 --year-mode all
+```
+
+如果某些大 shard 的全期任务失败，可以回退到按年拆分：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --mode drive --years 2019-2025 --year-mode annual
 ```
 
 ### 本地聚合
@@ -413,6 +437,8 @@ A00-A63           embedding 特征
 如果把 GEDI 先 mosaic，同一个位置多个月重复观测会被压成一个值，时间序列信息会丢失。
 
 因此代码按每张 GEDI 月度影像分别采样，然后合并表格。
+
+注意：`--year-mode all` 只是把 2019-2025 全期结果放在同一个导出任务和同一个 CSV 里；内部仍然逐张 GEDI 月度影像采样，`year`、`month`、`gedi_image_id` 都会保留。
 
 ## 常见问题
 
