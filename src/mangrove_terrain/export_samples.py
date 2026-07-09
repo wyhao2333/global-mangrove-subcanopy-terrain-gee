@@ -23,6 +23,23 @@ def _read_shard_index(index_dir: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def _read_finished_pairs(log_dir: Path) -> set[tuple[str, int]]:
+    pairs: set[tuple[str, int]] = set()
+    for path in sorted(log_dir.glob("sample_tasks_*.csv")):
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            continue
+        if "shard_id" not in df.columns or "year" not in df.columns:
+            continue
+        for row in df[["shard_id", "year"]].dropna().itertuples(index=False):
+            try:
+                pairs.add((str(row.shard_id), int(row.year)))
+            except Exception:
+                continue
+    return pairs
+
+
 def _local_download(fc: ee.FeatureCollection, out_path: Path, limit: int) -> int:
     limited = fc.limit(limit)
     try:
@@ -70,14 +87,18 @@ def run(
     tile_scale = int(cfg["sampling"].get("tile_scale", 8))
     local_limit = int(cfg["sampling"].get("local_row_limit", 5000))
     max_new_tasks = int(cfg["sampling"].get("max_new_tasks", 20))
+    skip_existing = bool(cfg["sampling"].get("skip_existing_tasks", True))
     drive_folder = cfg["sampling"].get("drive_folder", "mangrove_gedi_alphaearth_samples")
     years = years or list(range(int(cfg["datasets"]["alphaearth_start_year"]), int(cfg["datasets"]["alphaearth_end_year"]) + 1))
+    finished_pairs = _read_finished_pairs(log_dir) if skip_existing else set()
 
     task_rows: list[dict] = []
     submitted = 0
     console.rule("GEDI + AlphaEarth 采样")
     console.print(f"export_mode: {export_mode}; shards: {len(shard_df)}; years: {years}")
     console.print("GEDI 处理方式：逐张月度影像采样后 flatten 合并；不 mosaic、不按位置去重。")
+    if skip_existing:
+        console.print(f"跳过逻辑：已在历史 logs 中登记的 shard-year 会跳过，已登记数量 {len(finished_pairs)}。")
     if smoke:
         console.print("[yellow]当前是 smoke test：只跑 1 个很小 shard + 2020 年，本结果不代表全量样本数。[/yellow]")
 
@@ -94,6 +115,21 @@ def run(
                 console.print(f"[yellow]已达到 max_new_tasks={max_new_tasks}，本轮停止提交。[/yellow]")
                 break
 
+            pair = (shard_id, int(year))
+            prefix = f"gedi_alphaearth_{shard_id}_{year}"
+            out_path = out_dir / f"{prefix}.parquet"
+            if skip_existing and (pair in finished_pairs or (export_mode == "local" and out_path.exists())):
+                task_rows.append(
+                    {
+                        "time": datetime.now().isoformat(timespec="seconds"),
+                        "mode": export_mode,
+                        "status": "skipped_existing",
+                        "shard_id": shard_id,
+                        "year": year,
+                    }
+                )
+                continue
+
             start = f"{year}-01-01"
             end = f"{year + 1}-01-01"
             fc = build_sample_collection(
@@ -107,15 +143,14 @@ def run(
                 alpha_end_year=int(cfg["datasets"]["alphaearth_end_year"]),
                 tile_scale=tile_scale,
             )
-            prefix = f"gedi_alphaearth_{shard_id}_{year}"
 
             if export_mode == "local":
-                out_path = out_dir / f"{prefix}.parquet"
                 n_rows = _local_download(fc, out_path, local_limit)
                 task_rows.append(
                     {
                         "time": datetime.now().isoformat(timespec="seconds"),
                         "mode": "local",
+                        "status": "downloaded",
                         "shard_id": shard_id,
                         "year": year,
                         "output": str(out_path),
@@ -137,6 +172,7 @@ def run(
                     {
                         "time": datetime.now().isoformat(timespec="seconds"),
                         "mode": "drive",
+                        "status": "submitted",
                         "shard_id": shard_id,
                         "year": year,
                         "task_id": task.id,

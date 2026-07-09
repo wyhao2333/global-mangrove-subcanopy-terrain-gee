@@ -209,6 +209,7 @@ logs/sample_tasks_*.csv
 - 默认按 shard + year 分批提交。
 - 默认导出到 Google Drive，而不是一次性拉回本地。
 - GEDI 会按每张月度影像分别采样后合并，不做 mosaic、不做同位置去重；同一 25 m 或 10 m 位置跨月份重复出现会保留下来。
+- 默认每次最多新提交 `max_new_tasks` 个任务；重复运行时会读取 `logs/sample_tasks_*.csv`，已经登记过的 shard-year 会自动跳过。
 
 为什么全量默认导出到 Google Drive：
 
@@ -233,6 +234,11 @@ mangrove_gedi_alphaearth_samples
 ```text
 outputs/raw_samples/
 ```
+
+可以重复运行吗：
+
+- 可以。默认 `skip_existing_tasks: true`，已提交或已下载的 shard-year 会跳过。
+- 不要删除 `logs/sample_tasks_*.csv`，这些日志是断点续跑和防止重复提交的依据。
 
 默认每次最多提交 `20` 个新任务，避免一下子提交太多。  
 如果想改，在 `config.yaml` 里改：

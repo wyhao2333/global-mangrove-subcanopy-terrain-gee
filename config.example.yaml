@@ -31,6 +31,7 @@ sampling:
   tile_scale: 8
   local_row_limit: 5000
   max_new_tasks: 20
+  skip_existing_tasks: true
 
 aggregation:
   min_elev_count: 1
