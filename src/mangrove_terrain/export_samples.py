@@ -23,26 +23,44 @@ def _read_shard_index(index_dir: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def _read_finished_pairs(log_dir: Path, export_mode: str) -> set[tuple[str, int]]:
-    pairs: set[tuple[str, int]] = set()
+def _year_windows(years: list[int], year_mode: str) -> list[tuple[int, int]]:
+    years = sorted(set(int(y) for y in years))
+    if not years:
+        raise ValueError("years 不能为空。")
+    if year_mode == "annual":
+        return [(year, year) for year in years]
+    if year_mode == "all":
+        return [(years[0], years[-1])]
+    raise ValueError("year_mode 只能是 all 或 annual。")
+
+
+def _read_finished_windows(log_dir: Path, export_mode: str) -> set[tuple[str, int, int]]:
+    windows: set[tuple[str, int, int]] = set()
     for path in sorted(log_dir.glob("sample_tasks_*.csv")):
         try:
             df = pd.read_csv(path)
         except Exception:
             continue
-        if "shard_id" not in df.columns or "year" not in df.columns:
+        has_old_year = "year" in df.columns
+        has_year_window = "year_start" in df.columns and "year_end" in df.columns
+        if "shard_id" not in df.columns or not (has_old_year or has_year_window):
             continue
         if "mode" in df.columns:
             df = df[df["mode"].fillna("") == export_mode]
         if "status" in df.columns:
             accepted = {"submitted"} if export_mode == "drive" else {"downloaded"}
             df = df[df["status"].fillna("").isin(accepted)]
-        for row in df[["shard_id", "year"]].dropna().itertuples(index=False):
+        if "year_start" not in df.columns and "year" in df.columns:
+            df["year_start"] = df["year"]
+            df["year_end"] = df["year"]
+        if "year_start" not in df.columns or "year_end" not in df.columns:
+            continue
+        for row in df[["shard_id", "year_start", "year_end"]].dropna().itertuples(index=False):
             try:
-                pairs.add((str(row.shard_id), int(row.year)))
+                windows.add((str(row.shard_id), int(row.year_start), int(row.year_end)))
             except Exception:
                 continue
-    return pairs
+    return windows
 
 
 def _local_download(fc: ee.FeatureCollection, out_path: Path, limit: int) -> int:
@@ -68,6 +86,7 @@ def run(
     mode: str | None = None,
     max_shards: int | None = None,
     years: list[int] | None = None,
+    year_mode: str | None = None,
     smoke: bool = False,
 ) -> None:
     project = cfg["gee"]["project"]
@@ -87,6 +106,7 @@ def run(
         shard_df = shard_df.head(1)
         mode = "local"
         years = years or [2020]
+        year_mode = year_mode or "annual"
     elif max_shards is None and len(shard_df) < 10:
         raise RuntimeError(
             "当前 shard 索引数量很少，可能还是小样本测试索引。"
@@ -100,15 +120,17 @@ def run(
     skip_existing = bool(cfg["sampling"].get("skip_existing_tasks", True))
     drive_folder = cfg["sampling"].get("drive_folder", "mangrove_gedi_alphaearth_samples")
     years = years or list(range(int(cfg["datasets"]["alphaearth_start_year"]), int(cfg["datasets"]["alphaearth_end_year"]) + 1))
-    finished_pairs = _read_finished_pairs(log_dir, export_mode) if skip_existing else set()
+    year_mode = year_mode or str(cfg["sampling"].get("year_mode", "all"))
+    windows = _year_windows(years, year_mode)
+    finished_windows = _read_finished_windows(log_dir, export_mode) if skip_existing else set()
 
     task_rows: list[dict] = []
     submitted = 0
     console.rule("GEDI + AlphaEarth 采样")
-    console.print(f"export_mode: {export_mode}; shards: {len(shard_df)}; years: {years}")
+    console.print(f"export_mode: {export_mode}; shards: {len(shard_df)}; year_mode: {year_mode}; windows: {windows}")
     console.print("GEDI 处理方式：逐张月度影像采样后 flatten 合并；不 mosaic、不按位置去重。")
     if skip_existing:
-        console.print(f"跳过逻辑：已在历史 logs 中登记的 shard-year 会跳过，已登记数量 {len(finished_pairs)}。")
+        console.print(f"跳过逻辑：已在历史 logs 中登记的 shard-year_window 会跳过，已登记数量 {len(finished_windows)}。")
     if smoke:
         console.print("[yellow]当前是 smoke test：只跑 1 个很小 shard + 2020 年，本结果不代表全量样本数。[/yellow]")
 
@@ -120,28 +142,31 @@ def run(
             shard_path = shard_dir / f"{shard_id}.geojson"
         region = load_shard_as_region(shard_path)
 
-        for year in years:
+        for year_start, year_end in windows:
             if export_mode == "drive" and submitted >= max_new_tasks:
                 console.print(f"[yellow]已达到 max_new_tasks={max_new_tasks}，本轮停止提交。[/yellow]")
                 break
 
-            pair = (shard_id, int(year))
-            prefix = f"gedi_alphaearth_{shard_id}_{year}"
+            window = (shard_id, int(year_start), int(year_end))
+            year_label = str(year_start) if year_start == year_end else f"{year_start}_{year_end}"
+            prefix = f"gedi_alphaearth_{shard_id}_{year_label}"
             out_path = out_dir / f"{prefix}.parquet"
-            if skip_existing and (pair in finished_pairs or (export_mode == "local" and out_path.exists())):
+            if skip_existing and (window in finished_windows or (export_mode == "local" and out_path.exists())):
                 task_rows.append(
                     {
                         "time": datetime.now().isoformat(timespec="seconds"),
                         "mode": export_mode,
                         "status": "skipped_existing",
                         "shard_id": shard_id,
-                        "year": year,
+                        "year_start": year_start,
+                        "year_end": year_end,
+                        "year_label": year_label,
                     }
                 )
                 continue
 
-            start = f"{year}-01-01"
-            end = f"{year + 1}-01-01"
+            start = f"{year_start}-01-01"
+            end = f"{year_end + 1}-01-01"
             fc = build_sample_collection(
                 region=region,
                 shard_id=shard_id,
@@ -162,7 +187,9 @@ def run(
                         "mode": "local",
                         "status": "downloaded",
                         "shard_id": shard_id,
-                        "year": year,
+                        "year_start": year_start,
+                        "year_end": year_end,
+                        "year_label": year_label,
                         "output": str(out_path),
                         "rows_downloaded": n_rows,
                     }
@@ -184,7 +211,9 @@ def run(
                         "mode": "drive",
                         "status": "submitted",
                         "shard_id": shard_id,
-                        "year": year,
+                        "year_start": year_start,
+                        "year_end": year_end,
+                        "year_label": year_label,
                         "task_id": task.id,
                         "description": prefix[:100],
                         "drive_folder": drive_folder,
