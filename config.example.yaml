@@ -1,0 +1,37 @@
+gee:
+  # 可以改成自己的 GEE / Google Cloud project，例如 ee-wyhao026。
+  project: ee-wyhao00203
+  auth_mode: localhost
+
+datasets:
+  gedi_collection: LARSE/GEDI/GEDI02_A_002_MONTHLY
+  alphaearth_collection: GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL
+  gedi_start_date: "2019-01-01"
+  gedi_end_date: "2026-01-01"
+  alphaearth_start_year: 2019
+  alphaearth_end_year: 2025
+
+paths:
+  gmw_shp: data/raw/gmw_v3/gmw_v3_2020_vec.shp
+  index_dir: data/index
+  shard_dir: data/shards
+  raw_samples_dir: outputs/raw_samples
+  training_dir: outputs/training
+  log_dir: logs
+
+gmw:
+  # 单个 GeoJSON shard 太大会导致 GEE/代理断连。0.8 MB 是保守默认值。
+  max_geojson_mb: 0.8
+  read_batch_features: 500
+
+sampling:
+  # full 模式默认提交到 Google Drive，避免本地 getInfo 拉大表失败。
+  export_mode: drive
+  drive_folder: mangrove_gedi_alphaearth_samples
+  tile_scale: 8
+  local_row_limit: 5000
+  max_new_tasks: 20
+
+aggregation:
+  min_elev_count: 1
+  preview_csv_rows: 10000

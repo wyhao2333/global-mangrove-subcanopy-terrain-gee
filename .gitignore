@@ -1,0 +1,50 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Local config and credentials
+config.yaml
+*.backup
+credentials*
+*.json.bak
+
+# Large local data and generated outputs
+data/raw/*
+data/raw/gmw_v3/*
+data/shards/*
+data/index/*
+outputs/*
+outputs/raw_samples/*
+outputs/training/*
+logs/*
+
+# Keep folder placeholders
+!data/raw/.gitkeep
+!data/raw/gmw_v3/
+!data/raw/gmw_v3/README.md
+!data/index/.gitkeep
+!data/shards/.gitkeep
+!outputs/.gitkeep
+!outputs/raw_samples/
+!outputs/raw_samples/.gitkeep
+!outputs/training/
+!outputs/training/.gitkeep
+!logs/.gitkeep
+
+# Common geospatial heavy files
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.sbn
+*.sbx
+*.gpkg
+*.tif
+*.tiff
+*.zip
+
+# Tables produced by sampling
+*.parquet
+*.csv
