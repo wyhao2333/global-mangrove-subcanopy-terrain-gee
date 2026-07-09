@@ -201,7 +201,28 @@ logs/sample_tasks_*.csv
 
 - 可以。
 
-### 6. 双击 `run_04_sample_all.bat`
+### 6. 双击 `run_03b_submit_one_block_test.bat`
+
+作用：
+
+- 提交 1 个真实 `shard-year` 到 Google Drive。
+- 用来测试当前 GMW 分块大小是否能被 GEE 正常接收和执行。
+- 默认使用第 1 个 shard 的 2020 年，属于正式 Drive 导出任务，不是本地 `getInfo` 小样本。
+
+什么时候需要看这一步：
+
+- 第一次换电脑、换 GEE project、换 GMW 数据或调整 `gmw.max_geojson_mb` 后，建议先跑这一步。
+- 如果这个任务失败，可以把 `config.yaml` 里的 `gmw.max_geojson_mb` 从 `0.8` 降到 `0.5`，重新运行 `run_02_prepare_gmw.bat` 后再测试。
+
+本项目当前实测：
+
+- `max_geojson_mb = 0.8` 时，一个约 758 KB 的真实 GMW shard-year 任务可以成功提交并完成。
+
+可以重复运行吗：
+
+- 可以。默认会读取日志并跳过已经提交过的同一 shard-year。
+
+### 7. 双击 `run_04_sample_all.bat`
 
 作用：
 
@@ -254,7 +275,7 @@ sampling:
 - 可以，但要注意不要重复提交同一批 shard/year。
 - 每次提交情况会记录在 `logs/sample_tasks_*.csv`。
 
-### 7. 双击 `run_05_aggregate.bat`
+### 8. 双击 `run_05_aggregate.bat`
 
 作用：
 
@@ -337,6 +358,12 @@ powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
 
 ```powershell
 .\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --smoke
+```
+
+### 提交一块正式 Drive 测试任务
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --mode drive --max-shards 1 --years 2020
 ```
 
 ### 提交全量采样任务

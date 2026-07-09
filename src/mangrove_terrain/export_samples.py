@@ -23,7 +23,7 @@ def _read_shard_index(index_dir: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def _read_finished_pairs(log_dir: Path) -> set[tuple[str, int]]:
+def _read_finished_pairs(log_dir: Path, export_mode: str) -> set[tuple[str, int]]:
     pairs: set[tuple[str, int]] = set()
     for path in sorted(log_dir.glob("sample_tasks_*.csv")):
         try:
@@ -32,6 +32,11 @@ def _read_finished_pairs(log_dir: Path) -> set[tuple[str, int]]:
             continue
         if "shard_id" not in df.columns or "year" not in df.columns:
             continue
+        if "mode" in df.columns:
+            df = df[df["mode"].fillna("") == export_mode]
+        if "status" in df.columns:
+            accepted = {"submitted"} if export_mode == "drive" else {"downloaded"}
+            df = df[df["status"].fillna("").isin(accepted)]
         for row in df[["shard_id", "year"]].dropna().itertuples(index=False):
             try:
                 pairs.add((str(row.shard_id), int(row.year)))
@@ -95,7 +100,7 @@ def run(
     skip_existing = bool(cfg["sampling"].get("skip_existing_tasks", True))
     drive_folder = cfg["sampling"].get("drive_folder", "mangrove_gedi_alphaearth_samples")
     years = years or list(range(int(cfg["datasets"]["alphaearth_start_year"]), int(cfg["datasets"]["alphaearth_end_year"]) + 1))
-    finished_pairs = _read_finished_pairs(log_dir) if skip_existing else set()
+    finished_pairs = _read_finished_pairs(log_dir, export_mode) if skip_existing else set()
 
     task_rows: list[dict] = []
     submitted = 0
