@@ -3,7 +3,18 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import aggregate_samples, export_samples, inspect_gee, modeling_placeholder, prepare_gmw
+from . import (
+    aggregate_samples,
+    check_native_tasks,
+    check_staged_tasks,
+    export_native_tiles,
+    export_samples,
+    export_staged,
+    inspect_gee,
+    modeling_placeholder,
+    prepare_gmw,
+    validate_native,
+)
 from .config import ensure_output_dirs, load_config
 
 
@@ -27,6 +38,7 @@ def main() -> None:
     p_prepare = sub.add_parser("prepare-gmw", help="切分 GMW 2020 红树林面")
     p_prepare.add_argument("--all", action="store_true", help="全量切分；不加时默认只生成 5 个 smoke-test shards")
     p_prepare.add_argument("--max-shards", type=int, default=None, help="最多生成多少个 shards")
+    p_prepare.add_argument("--native-only", action="store_true", help="只生成原生6度瓦片索引和1个验证 shard（推荐）")
 
     p_sample = sub.add_parser("sample", help="采样 GEDI + AlphaEarth")
     p_sample.add_argument("--mode", choices=["local", "drive"], default=None, help="local 小样本下载；drive 正式提交导出任务")
@@ -34,6 +46,35 @@ def main() -> None:
     p_sample.add_argument("--years", type=_years, default=None, help="年份，例如 2020 或 2019-2025")
     p_sample.add_argument("--year-mode", choices=["all", "annual"], default=None, help="all: 一个 shard 导出全部年份；annual: 按年拆分")
     p_sample.add_argument("--smoke", action="store_true", help="小样本测试：1 个 shard + 2020 + 本地下载")
+
+    p_native = sub.add_parser("sample-native", help="直接原生瓦片联合采样（仅实验/回退）")
+    p_native.add_argument("--mode", choices=["local", "drive"], default=None)
+    p_native.add_argument("--max-tiles", type=int, default=None, help="最多处理多少个原生瓦片")
+    p_native.add_argument("--tiles", nargs="*", default=None, help="指定瓦片，例如 102W_012N")
+    p_native.add_argument("--years", type=_years, default=None, help="年份，例如 2020 或 2019-2025")
+    p_native.add_argument("--year-mode", choices=["all", "annual"], default=None)
+    p_native.add_argument("--smoke", action="store_true", help="本地限量下载一个原生瓦片")
+
+    p_validate = sub.add_parser("validate-native", help="逐字段比较旧流程和原生瓦片新流程")
+    p_validate.add_argument("--shard-id", default=None, help="用于对照的旧 shard；默认取索引第一项")
+    p_validate.add_argument("--year", type=int, default=2020)
+    p_validate.add_argument("--month", type=int, default=1)
+    p_validate.add_argument("--limit", type=int, default=5000)
+
+    for command, help_text in [
+        ("export-gedi-assets", "阶段1：导出 GEDI 月度脚印为 GEE 表资产"),
+        ("sample-alpha-assets", "阶段2：从 GEDI 表资产采样 AlphaEarth"),
+    ]:
+        staged = sub.add_parser(command, help=help_text)
+        staged.add_argument("--max-tiles", type=int, default=None)
+        staged.add_argument("--tiles", nargs="*", default=None, help="指定瓦片，例如 018W_006N")
+        staged.add_argument("--years", type=_years, default=None)
+        staged.add_argument("--year-mode", choices=["all", "annual"], default=None)
+        if command == "sample-alpha-assets":
+            staged.add_argument("--max-chunks", type=int, default=None, help="最多提交多少个空间块，用于小样本测试")
+
+    sub.add_parser("check-native-tasks", help="检查原生瓦片 Drive 导出任务状态")
+    sub.add_parser("check-staged-tasks", help="检查两阶段 GEDI 资产和 AlphaEarth 导出任务状态")
 
     p_agg = sub.add_parser("aggregate", help="本地按 AlphaEarth 10 m 像元聚合 GEDI 高程")
     p_agg.add_argument("--input-dir", default=None, help="原始 CSV/Parquet 所在目录")
@@ -49,7 +90,12 @@ def main() -> None:
         if args.command == "inspect-gee":
             inspect_gee.run(cfg)
         elif args.command == "prepare-gmw":
-            prepare_gmw.run(cfg, all_shards=args.all, max_shards=args.max_shards)
+            prepare_gmw.run(
+                cfg,
+                all_shards=args.all,
+                max_shards=args.max_shards,
+                native_only=args.native_only,
+            )
         elif args.command == "sample":
             export_samples.run(
                 cfg,
@@ -58,6 +104,45 @@ def main() -> None:
                 years=args.years,
                 year_mode=args.year_mode,
                 smoke=args.smoke,
+            )
+        elif args.command == "sample-native":
+            export_native_tiles.run(
+                cfg,
+                mode=args.mode,
+                max_tiles=args.max_tiles,
+                tile_ids=args.tiles,
+                years=args.years,
+                year_mode=args.year_mode,
+                smoke=args.smoke,
+            )
+        elif args.command == "validate-native":
+            validate_native.run(
+                cfg,
+                shard_id=args.shard_id,
+                year=args.year,
+                month=args.month,
+                limit=args.limit,
+            )
+        elif args.command == "check-native-tasks":
+            check_native_tasks.run(cfg)
+        elif args.command == "check-staged-tasks":
+            check_staged_tasks.run(cfg)
+        elif args.command == "export-gedi-assets":
+            export_staged.export_gedi_assets(
+                cfg,
+                max_tiles=args.max_tiles,
+                tile_ids=args.tiles,
+                years=args.years,
+                year_mode=args.year_mode,
+            )
+        elif args.command == "sample-alpha-assets":
+            export_staged.export_alpha_samples(
+                cfg,
+                max_tiles=args.max_tiles,
+                tile_ids=args.tiles,
+                years=args.years,
+                year_mode=args.year_mode,
+                max_chunks=args.max_chunks,
             )
         elif args.command == "aggregate":
             aggregate_samples.run(cfg, input_dir=args.input_dir, output_path=args.output)
