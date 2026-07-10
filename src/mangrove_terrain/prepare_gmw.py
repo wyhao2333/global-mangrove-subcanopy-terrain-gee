@@ -106,7 +106,12 @@ def _build_bounds_index(shp_path: Path) -> pd.DataFrame:
     return df
 
 
-def run(cfg: dict, all_shards: bool = False, max_shards: int | None = None) -> None:
+def run(
+    cfg: dict,
+    all_shards: bool = False,
+    max_shards: int | None = None,
+    native_only: bool = False,
+) -> None:
     shp_path = resolve_path(cfg, "gmw_shp")
     index_dir = resolve_path(cfg, "index_dir")
     shard_dir = resolve_path(cfg, "shard_dir")
@@ -122,7 +127,10 @@ def run(cfg: dict, all_shards: bool = False, max_shards: int | None = None) -> N
 
     max_bytes = int(float(cfg["gmw"]["max_geojson_mb"]) * 1_000_000)
     batch_size = int(cfg["gmw"].get("read_batch_features", 500))
-    if not all_shards and max_shards is None:
+    if native_only:
+        all_shards = False
+        max_shards = 1
+    elif not all_shards and max_shards is None:
         max_shards = 5
 
     console.rule("GMW 预处理")
@@ -217,5 +225,7 @@ def run(cfg: dict, all_shards: bool = False, max_shards: int | None = None) -> N
     shard_df.to_csv(index_dir / "aoi_shards.csv", index=False, encoding="utf-8-sig")
     console.print(f"[green]完成。生成 shards: {len(shard_df):,}[/green]")
     console.print(f"索引文件: {index_dir / 'aoi_shards.csv'}")
-    if not all_shards:
+    if native_only:
+        console.print("[green]原生瓦片索引已生成；额外保留 1 个旧 shard 用于结果一致性验证。[/green]")
+    elif not all_shards:
         console.print("[yellow]当前是小样本模式。如需全量切分，请运行 prepare-gmw --all。[/yellow]")
