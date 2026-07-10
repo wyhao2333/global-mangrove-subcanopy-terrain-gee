@@ -12,10 +12,16 @@ def project_root() -> Path:
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "gee": {"project": "ee-wyhao00203", "auth_mode": "localhost"},
+    "gee": {
+        "project": "ee-wyhao00203",
+        "auth_mode": "localhost",
+        "asset_root": "projects/{project}/assets/global_mangrove_subcanopy_terrain",
+    },
     "datasets": {
         "gedi_collection": "LARSE/GEDI/GEDI02_A_002_MONTHLY",
         "alphaearth_collection": "GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL",
+        "gmw_raster_collection": "projects/earthengine-legacy/assets/projects/sat-io/open-datasets/GMW/extent/GMW_V3",
+        "gmw_raster_image_index": "gmw_v3_2020",
         "gedi_start_date": "2019-01-01",
         "gedi_end_date": "2026-01-01",
         "alphaearth_start_year": 2019,
@@ -38,6 +44,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_new_tasks": 20,
         "skip_existing_tasks": True,
         "year_mode": "all",
+        "staged_point_year_mode": "all",
+        "staged_alpha_year_mode": "all",
+        "alpha_max_points_per_task": 10000,
+        "alpha_min_chunk_degrees": 0.0625,
     },
     "aggregation": {"min_elev_count": 1, "preview_csv_rows": 10000},
 }
