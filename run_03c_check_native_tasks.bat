@@ -8,7 +8,7 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 set PYTHONPATH=%~dp0src
-echo Building the 6-degree native GEDI tile index and one validation shard.
-".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml prepare-gmw --native-only
+echo Checking native GEDI tile export tasks...
+".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml check-native-tasks
 echo.
 pause

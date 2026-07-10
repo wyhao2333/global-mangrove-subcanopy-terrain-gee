@@ -8,6 +8,7 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 set PYTHONPATH=%~dp0src
-".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml sample --smoke
+echo Comparing legacy shard sampling with native-tile sampling on one observed month.
+".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml validate-native --year 2020 --month 3 --limit 5000
 echo.
 pause

@@ -37,6 +37,16 @@ def predictor_image(alpha: ee.Image) -> ee.Image:
     return alpha.addBands(coords)
 
 
+def gmw_mask_image(collection_id: str, image_index: str) -> ee.Image:
+    """读取 GMW 2020 栅格并转换为仅保留红树林像元的掩膜。"""
+    image = ee.Image(
+        ee.ImageCollection(collection_id)
+        .filter(ee.Filter.eq("system:index", image_index))
+        .first()
+    )
+    return image.select(0).gt(0).selfMask().rename("gmw_mask")
+
+
 def quality_masked_gedi_points(
     image: ee.Image,
     region: ee.Geometry,
@@ -118,6 +128,84 @@ def build_sample_collection(
         )
 
     return ee.FeatureCollection(ee.List.sequence(0, n.subtract(1)).map(one_image)).flatten()
+
+
+def build_native_tile_sample_collection(
+    region: ee.Geometry,
+    tile_id: str,
+    gedi_id: str,
+    alpha_id: str,
+    gmw_id: str,
+    gmw_image_index: str,
+    gedi_start: str,
+    gedi_end: str,
+    alpha_start_year: int,
+    alpha_end_year: int,
+    tile_scale: int,
+) -> ee.FeatureCollection:
+    """按 GEDI 原生 6 度瓦片逐月联合采样，不做 mosaic 或时间去重。"""
+    alpha = alphaearth_mean_image(alpha_id, alpha_start_year, alpha_end_year)
+    predictors = predictor_image(alpha)
+    gmw_mask = gmw_mask_image(gmw_id, gmw_image_index)
+    col = (
+        ee.ImageCollection(gedi_id)
+        .filterDate(gedi_start, gedi_end)
+        .filter(ee.Filter.stringEndsWith("system:index", tile_id))
+    )
+    n = col.size()
+    images = col.toList(n)
+
+    def one_image(i: ee.Number) -> ee.FeatureCollection:
+        image = ee.Image(images.get(i))
+        quality_mask = (
+            image.select("quality_flag")
+            .eq(1)
+            .And(image.select("degrade_flag").eq(0))
+            .And(image.select("elev_lowestmode").mask())
+        )
+        sampled = image.select(GEDI_FIELDS).updateMask(quality_mask).updateMask(gmw_mask).sample(
+            region=region,
+            scale=25,
+            projection=image.select("elev_lowestmode").projection(),
+            geometries=True,
+            tileScale=tile_scale,
+        )
+        date = ee.Date(image.get("system:time_start"))
+        image_id = ee.String(image.get("system:index"))
+
+        def add_props(feature: ee.Feature) -> ee.Feature:
+            coord = feature.geometry().coordinates()
+            return feature.set(
+                {
+                    "lon": coord.get(0),
+                    "lat": coord.get(1),
+                    "year": date.get("year"),
+                    "month": date.get("month"),
+                    "gedi_image_id": image_id,
+                    "shard_id": tile_id,
+                }
+            )
+
+        return sampled.map(add_props)
+
+    points = ee.FeatureCollection(ee.List.sequence(0, n.subtract(1)).map(one_image)).flatten()
+    return predictors.sampleRegions(
+        collection=points,
+        properties=[
+            "shard_id",
+            "gedi_image_id",
+            "year",
+            "month",
+            "lon",
+            "lat",
+            "elev_lowestmode",
+            "quality_flag",
+            "degrade_flag",
+        ],
+        scale=10,
+        geometries=False,
+        tileScale=tile_scale,
+    )
 
 
 def selectors() -> list[str]:

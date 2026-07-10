@@ -6,6 +6,9 @@ gee:
 datasets:
   gedi_collection: LARSE/GEDI/GEDI02_A_002_MONTHLY
   alphaearth_collection: GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL
+  # GMW v3 公共栅格与本项目的 GMW 2020 矢量来自同一版本，约 25 m。
+  gmw_raster_collection: projects/earthengine-legacy/assets/projects/sat-io/open-datasets/GMW/extent/GMW_V3
+  gmw_raster_image_index: gmw_v3_2020
   gedi_start_date: "2019-01-01"
   gedi_end_date: "2026-01-01"
   alphaearth_start_year: 2019
@@ -20,8 +23,8 @@ paths:
   log_dir: logs
 
 gmw:
-  # 单个 GeoJSON shard 太大会导致 GEE/代理断连。2.0 MB 已经过真实 GEE 全期导出测试。
-  # 如果个别区域失败，可降到 1.5 或 0.8 后重新切分 GMW。
+  # 以下大小只影响旧式 legacy_shards 回退流程；推荐 native_tiles 流程不依赖它。
+  # 单个 GeoJSON shard 太大会导致 GEE/代理断连，旧流程可从 2.0 降到 1.5 或 0.8。
   max_geojson_mb: 2.0
   read_batch_features: 500
 

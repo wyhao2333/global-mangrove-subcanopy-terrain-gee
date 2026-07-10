@@ -16,6 +16,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "datasets": {
         "gedi_collection": "LARSE/GEDI/GEDI02_A_002_MONTHLY",
         "alphaearth_collection": "GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL",
+        "gmw_raster_collection": "projects/earthengine-legacy/assets/projects/sat-io/open-datasets/GMW/extent/GMW_V3",
+        "gmw_raster_image_index": "gmw_v3_2020",
         "gedi_start_date": "2019-01-01",
         "gedi_end_date": "2026-01-01",
         "alphaearth_start_year": 2019,
