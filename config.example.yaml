@@ -2,6 +2,8 @@ gee:
   # 可以改成自己的 GEE / Google Cloud project，例如 ee-wyhao026。
   project: ee-wyhao00203
   auth_mode: localhost
+  # 两阶段流程用于保存 GEDI 脚印表资产的根目录；{project} 会自动替换为上面的 project。
+  asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain
 
 datasets:
   gedi_collection: LARSE/GEDI/GEDI02_A_002_MONTHLY
@@ -36,8 +38,15 @@ sampling:
   local_row_limit: 5000
   max_new_tasks: 20
   skip_existing_tasks: true
-  # all = 一个 shard 导出 2019-2025 全部 GEDI 月度观测；annual = 按年拆分作为失败回退。
+  # 下面的 year_mode 只用于旧式直接联合采样；正式流程使用下方两阶段设置。
+  # all = 一个 shard/瓦片导出全部年份；annual = 按年拆分作为失败回退。
   year_mode: all
+  # 阶段1：一次保存全期GEDI脚印表资产，不重算AlphaEarth。
+  staged_point_year_mode: all
+  # 阶段2：从表资产按自适应空间块采样AlphaEarth。默认全期，但每块点数受限。
+  staged_alpha_year_mode: all
+  alpha_max_points_per_task: 10000
+  alpha_min_chunk_degrees: 0.0625
 
 aggregation:
   min_elev_count: 1
