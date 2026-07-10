@@ -44,4 +44,10 @@ def run(cfg: dict) -> None:
     bands = alpha.first().bandNames().getInfo()
     console.print(f"AlphaEarth band count: {len(bands)}")
     console.print("First 10 bands:", bands[:10])
+    gmw = ee.Image(
+        ee.ImageCollection(cfg["datasets"]["gmw_raster_collection"])
+        .filter(ee.Filter.eq("system:index", cfg["datasets"]["gmw_raster_image_index"]))
+        .first()
+    )
+    console.print(f"GMW 2020 raster bands: {gmw.bandNames().getInfo()}")
     console.print("[green]检查完成。[/green]")
