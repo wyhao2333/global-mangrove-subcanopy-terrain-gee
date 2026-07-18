@@ -335,6 +335,33 @@ logs/staged_task_status_latest.csv
 
 ### 11. 双击 `run_04b_sample_alpha_all.bat`
 
+#### 4b 开始前必须满足
+
+1. 已运行步骤 2，且本地存在 `data/index/gmw_6deg_tiles.csv` 与 `data/index/gmw_1deg_cells.csv`。
+2. 来源目录 `projects/my-project-2025924/assets/global_mangrove_subcanopy_terrain/gedi_points` 中的阶段 1 GEDI 表资产已完成；未导出的空瓦片允许不存在。
+3. 上述目录及其直接 `TABLE` 子资产已经共享给 `helpful-weft-484410-i4` 凭证背后的 Google 账号。共享后至少应能读取 `gedi_points_000E_000N_2019_2025`。
+4. 本机已有有效凭证：`%USERPROFILE%\.config\earthengine\projects\helpful-weft-484410-i4.json`，且该 project 可以创建 GEE Asset。
+5. 不要同时启动两个 04b 窗口。单个来源目录和目标 project 会自动加本地锁。
+
+#### 当前默认配置
+
+```yaml
+gee:
+  project: helpful-weft-484410-i4  # AlphaEarth 输出资产的归属账号
+
+sampling:
+  gedi_source_asset_folder: projects/my-project-2025924/assets/global_mangrove_subcanopy_terrain/gedi_points
+  staged_point_year_mode: all      # 同一瓦片保留 2019-2025 全部月度 GEDI 观测
+  staged_alpha_year_mode: all      # 对 2019-2025 AlphaEarth 年度 embedding 取均值
+  alpha_max_points_per_task: 10000
+  alpha_initial_batch: 30
+  alpha_refill_batch: 30
+  alpha_poll_minutes: 10
+  alpha_active_threshold: 10
+```
+
+双击后两个输入都直接回车即可使用以上默认值。第一个输入决定**输出**写入哪个 project；第二个输入决定从哪个已共享目录**读取** GEDI 点表，两者可以属于不同账号。
+
 作用：
 
 - 等阶段1资产完成后，从资产中按空间块采样AlphaEarth，输出为**当前执行账号自己的GEE Table Asset**。
@@ -342,26 +369,26 @@ logs/staged_task_status_latest.csv
 - 每个任务只计算当前空间块覆盖的AlphaEarth影像。黑色窗口会持续运行；按 `Ctrl+C` 可以安全停止，重新双击会从任务清单恢复。
 - 脚本会用中文询问“执行 project”和“GEDI来源目录”；都直接回车则使用 `config.yaml` 的当前 project 和默认目录。
 
-如果账号 A 已完成阶段1，目录为：
+本项目当前的已共享阶段 1 GEDI 来源目录为：
 
 ```text
-projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
+projects/my-project-2025924/assets/global_mangrove_subcanopy_terrain/gedi_points
 ```
 
-请先在 Earth Engine Assets 页面把这个文件夹（或所有子表资产）共享给账号 B，至少给读取权限。然后双击 `run_04b_sample_alpha_all.bat`，第一个输入框填账号 B 的 project，例如 `ee-wyhao026`，第二个输入框填上面的完整目录。步骤4b会把结果保存到 B 自己的资产目录：
+该目录已经批量共享。双击 `run_04b_sample_alpha_all.bat` 后，两个输入框均直接回车；程序会使用 `helpful-weft-484410-i4` 读取该来源并将结果保存到当前执行账号自己的资产目录：
 
 ```text
-projects/<账号B的project>/assets/global_mangrove_subcanopy_terrain/alpha_samples/source_<来源哈希>/
+projects/helpful-weft-484410-i4/assets/global_mangrove_subcanopy_terrain/alpha_samples/source_<来源哈希>/
 ```
 
-也可以写入 `config.yaml`：
+如果今后换来源目录或输出账号，只修改本机 `config.yaml`；公开仓库中供新用户复制的是 `config.example.yaml`，不会提交本机 `config.yaml`：
 
 ```yaml
 gee:
-  project: ee-wyhao026  # 步骤4b执行和表资产保存的账号
+  project: helpful-weft-484410-i4  # 步骤4b执行和表资产保存的账号
 
 sampling:
-  gedi_source_asset_folder: projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
+  gedi_source_asset_folder: projects/my-project-2025924/assets/global_mangrove_subcanopy_terrain/gedi_points
 ```
 
 如果共享权限不足，程序会显示无法读取的资产路径，不会提交错误任务，并写入 `logs/alpha_asset_source_issues_<project>_<来源哈希>.csv`。任务清单保存在 `logs/alpha_asset_jobs_<project>_<来源哈希>.csv`；失败清单保存在 `logs/alpha_asset_failures_<project>_<来源哈希>.csv`。

@@ -46,8 +46,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "year_mode": "all",
         "staged_point_year_mode": "all",
         "staged_alpha_year_mode": "all",
-        # 留空时从当前 project 的阶段 1 目录读取；可改为已共享的完整外部目录。
-        "gedi_source_asset_folder": None,
+        # 阶段 4b 默认读取已共享的阶段 1 GEDI 表资产；可改为其他已共享目录。
+        "gedi_source_asset_folder": "projects/my-project-2025924/assets/global_mangrove_subcanopy_terrain/gedi_points",
         # 阶段2自动调度：任务先导出为当前账号的 GEE Table Asset，再由步骤4c导出到Drive。
         "alpha_initial_batch": 30,
         "alpha_refill_batch": 30,
