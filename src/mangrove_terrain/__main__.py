@@ -7,6 +7,7 @@ from . import (
     aggregate_samples,
     check_native_tasks,
     check_staged_tasks,
+    ee_auth,
     export_native_tiles,
     export_samples,
     export_staged,
@@ -31,9 +32,14 @@ def main() -> None:
         description="全球红树林 GEDI + AlphaEarth 数据制备流程",
     )
     parser.add_argument("--config", default="config.yaml", help="配置文件路径，默认 config.yaml")
+    parser.add_argument("--project", dest="project_override", default=None, help="本次运行使用的 GEE project，不修改 config.yaml")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("inspect-gee", help="检查 GEE 登录和数据集可访问性")
+
+    p_auth = sub.add_parser("auth-project", help="手动复制授权链接，保存指定 project 的独立 GEE 凭证")
+    p_auth.add_argument("--project", dest="auth_project", required=True, help="要保存凭证并验证权限的 GEE project ID")
+    p_auth.add_argument("--auth-mode", default="localhost:0", help="本机回调地址，默认 localhost:0 自动选端口")
 
     p_prepare = sub.add_parser("prepare-gmw", help="切分 GMW 2020 红树林面")
     p_prepare.add_argument("--all", action="store_true", help="全量切分；不加时默认只生成 5 个 smoke-test shards")
@@ -72,6 +78,11 @@ def main() -> None:
         staged.add_argument("--year-mode", choices=["all", "annual"], default=None)
         if command == "sample-alpha-assets":
             staged.add_argument("--max-chunks", type=int, default=None, help="最多提交多少个空间块，用于小样本测试")
+            staged.add_argument(
+                "--source-asset-folder",
+                default=None,
+                help="阶段 1 GEDI 点表目录；可填写其他账号已共享的完整 GEE asset 路径",
+            )
 
     sub.add_parser("check-native-tasks", help="检查原生瓦片 Drive 导出任务状态")
     sub.add_parser("check-staged-tasks", help="检查两阶段 GEDI 资产和 AlphaEarth 导出任务状态")
@@ -83,7 +94,17 @@ def main() -> None:
     sub.add_parser("model-placeholder", help="显示建模占位说明")
 
     args = parser.parse_args()
+    if args.command == "auth-project":
+        try:
+            ee_auth.add_project_credentials(args.auth_project, auth_mode=args.auth_mode)
+        except Exception as exc:
+            print(f"\n错误：{exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        return
+
     cfg = load_config(args.config)
+    if args.project_override:
+        cfg["gee"]["project"] = args.project_override
     ensure_output_dirs(cfg)
 
     try:
@@ -143,6 +164,7 @@ def main() -> None:
                 years=args.years,
                 year_mode=args.year_mode,
                 max_chunks=args.max_chunks,
+                source_asset_folder=args.source_asset_folder,
             )
         elif args.command == "aggregate":
             aggregate_samples.run(cfg, input_dir=args.input_dir, output_path=args.output)

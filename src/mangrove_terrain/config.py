@@ -46,6 +46,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "year_mode": "all",
         "staged_point_year_mode": "all",
         "staged_alpha_year_mode": "all",
+        # 留空时从当前 project 的阶段 1 目录读取；可改为已共享的完整外部目录。
+        "gedi_source_asset_folder": None,
         "alpha_max_points_per_task": 10000,
         "alpha_min_chunk_degrees": 0.0625,
     },

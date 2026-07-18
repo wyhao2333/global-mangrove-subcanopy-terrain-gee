@@ -11,7 +11,7 @@ GMW 2020 红树林范围
 
 正式流程采用“两阶段”：阶段1只提取并保存全部GEDI月度脚印为GEE表资产；阶段2从表资产按空间块采样AlphaEarth。这样可以避免把几十个月的GEDI点和全球AlphaEarth均值一次性放进同一张计算图。
 
-推荐流程按 GEDI 原生 6°瓦片运行，全球 GMW 范围约 201 个瓦片。GMW 本地 shp 用来生成瓦片索引和一致性验证；GEE 计算时使用同版本的 GMW v3 2020 公共栅格掩膜，避免反复计算一百多万个复杂矢量面。
+推荐流程按 GEDI 原生 6°瓦片运行，全球 GMW 范围约 201 个瓦片。GMW 本地 shp 用来生成瓦片索引和一致性验证；GEE 计算时使用同版本的 GMW v3 2020 公共栅格掩膜，避免反复计算一百多万个复杂矢量面。索引按 GMW 矢量范围与格网的相交关系生成，而不是只看面中心点，因此跨 1° 或 6° 边界的红树林不会被遗漏。
 
 项目已核验这 201 个瓦片在 GEE 中全部有对应 GEDI 数据，2019-2025 合计 12,688 张月度瓦片影像，每个空间瓦片包含 55-64 个月；内部仍逐月提取，不做时间合成。
 
@@ -138,7 +138,25 @@ paths:
   gmw_shp: data/raw/gmw_v3/gmw_v3_2020_vec.shp
 ```
 
-如果你要换 GEE project，就改 `project`。
+如果你要换 GEE project，可以改 `project`；更方便的方法见下一节，运行时通过 `--project` 临时切换，不会修改此文件。
+
+### 2.1 新增 GEE 账号凭证（不自动打开浏览器）
+
+双击 `run_00_add_gee_account.bat`，输入新的 GEE project ID，例如 `ee-wyhao026`。程序会在黑色窗口打印 Earth Engine 授权链接，**不会**自动打开默认浏览器。
+
+请把链接复制到已经登录目标 Google 账号的浏览器窗口，完成授权后保持黑色窗口运行，直到显示 project 验证成功。凭证会自动保存为按 project 命名的文件：
+
+```text
+%USERPROFILE%\.config\earthengine\projects\<project-id>.json
+```
+
+例如 `ee-wyhao026` 对应：
+
+```text
+%USERPROFILE%\.config\earthengine\projects\ee-wyhao026.json
+```
+
+每个 project 使用独立凭证。后续运行程序时填入不同 project 即可切换账号，不需要手工复制、覆盖或删除凭证。若只是第一次普通运行 `run_01_check_gee.bat`，没有凭证时仍会使用原有的自动浏览器认证方式。
 
 ### 3. 双击 `run_01_check_gee.bat`
 
@@ -316,6 +334,27 @@ logs/staged_task_status_latest.csv
 - 等阶段1资产完成后，从资产中按空间块采样AlphaEarth。
 - 默认每个空间块最多10,000个GEDI脚印。
 - 每个任务只计算当前空间块覆盖的AlphaEarth影像。
+- 可读取另一个已经共享给当前 Google 账号的阶段1 GEDI资产。脚本会询问“执行 project”和“GEDI来源目录”；都直接回车则使用 `config.yaml` 的当前 project 和默认目录。
+
+如果账号 A 已完成阶段1，目录为：
+
+```text
+projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
+```
+
+请先在 Earth Engine Assets 页面把这个文件夹（或所有子表资产）共享给账号 B，至少给读取权限。然后双击 `run_04b_sample_alpha_all.bat`，第一个输入框填账号 B 的 project，例如 `ee-wyhao026`，第二个输入框填上面的完整目录。阶段2可以读取 A 的点表，但导出的 Google Drive CSV 会进入 B 当前账号的 Drive。
+
+也可以写入 `config.yaml`：
+
+```yaml
+gee:
+  project: ee-wyhao026  # 阶段2执行和Drive导出的账号
+
+sampling:
+  gedi_source_asset_folder: projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
+```
+
+如果共享权限不足，程序会写入 `source_asset_unavailable` 到最新的 `logs/alpha_sample_tasks_*.csv`，并显示无法读取的资产路径，不会提交错误任务。任务去重包含目标 project、GEDI来源资产、瓦片和空间块，因此切换账号或来源目录不会被旧日志误跳过。
 
 阶段2输出CSV到Google Drive：
 
@@ -326,6 +365,8 @@ mangrove_gedi_alphaearth_samples/
 102W_012N测试瓦片共产生8个空间块，合计20,146个GEDI脚印；其他瓦片会根据点密度自动递归切分。
 
 按此前约869万条质量合格GEDI观测估算，阶段2理论上至少需要约869个10,000点块，实际数量会因1°边界和空间密度增加。阶段1约201个表资产，在3个并行任务下预计数小时；阶段2通常是数小时到1-2天，整体建议按1-3天安排，并以 `staged_task_status_latest.csv` 的真实耗时为准。
+
+速度判断：阶段1已实测完整 6°瓦片 `102W_012N` 约4.1分钟、约0.92 EECU秒，已经很轻量；阶段2仍是总耗时和EECU的主体，因为它必须为每一个GEDI脚印读取64维10m embedding。小块实测2,475个脚印约12秒、约440 EECU秒。多账号可把阶段2分散到不同 project，增加可并行任务和可用额度；结果定义不变，也不会丢失月度观测。
 
 为什么全量默认导出到 Google Drive：
 
@@ -430,6 +471,20 @@ powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
 .\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml inspect-gee
 ```
 
+### 新增或切换 GEE project 凭证
+
+下面命令只打印授权链接，不会自动打开浏览器。请把链接复制到指定的浏览器窗口：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml auth-project --project ee-wyhao026
+```
+
+临时使用该 project 读取另一个账号已共享的 GEDI 资产并提交阶段2，不修改 `config.yaml`：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml --project ee-wyhao026 sample-alpha-assets --years 2019-2025 --year-mode all --source-asset-folder projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
+```
+
 ### 生成原生瓦片索引
 
 ```powershell
@@ -448,16 +503,16 @@ powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
 .\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml validate-native --year 2020 --month 3 --limit 5000
 ```
 
-### 提交一块正式 Drive 测试任务
+### 提交一块正式 GEDI 资产测试任务
 
 ```powershell
 .\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml export-gedi-assets --tiles 102W_012N --years 2019-2025 --year-mode all
 ```
 
-查看任务状态：
+查看两阶段任务状态：
 
 ```powershell
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml check-native-tasks
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml check-staged-tasks
 ```
 
 ### 提交全量采样任务
@@ -566,7 +621,11 @@ Caller does not have required permission to use project
 1. 修改 `config.yaml` 里的 `gee.project`。
 2. 或者让 project 管理员给你的 Google 账号授权。
 
-### 4. 全量采样为什么没有马上生成本地 CSV
+### 4. 阶段2提示无法读取其他账号的 GEDI 资产
+
+确认来源路径是以 `.../gedi_points` 结尾的完整目录，并由资产所有者把文件夹或全部子表资产共享给当前 Google 账号。错误详情会记录在最新 `logs/alpha_sample_tasks_*.csv` 的 `error` 字段。
+
+### 5. 全量采样为什么没有马上生成本地 CSV
 
 全量采样数据太大，默认是提交 Google Drive 导出任务。  
 请到 Google Drive 下载 CSV，再放到：
@@ -577,7 +636,7 @@ outputs/raw_samples/
 
 然后运行聚合。
 
-### 5. 可以中断后继续吗
+### 6. 可以中断后继续吗
 
 可以。  
 已经生成的索引、验证 shard、日志和下载表都不会自动删除。

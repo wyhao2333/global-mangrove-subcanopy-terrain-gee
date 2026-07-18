@@ -9,7 +9,14 @@ from rich.console import Console
 from tqdm import tqdm
 
 from . import ee_auth
-from .asset_utils import ensure_folder, list_child_assets, point_asset_folder
+from .asset_utils import (
+    asset_project_id,
+    ensure_folder,
+    list_child_assets,
+    point_asset_folder,
+    readable_asset,
+    source_point_asset_folder,
+)
 from .config import resolve_path
 from .export_samples import _year_windows
 from .gee_workflow import (
@@ -53,8 +60,17 @@ def _task_states(task_ids: list[str]) -> dict[str, str]:
     return states
 
 
-def _submitted_windows(log_dir: Path, prefix: str) -> set[tuple[str, int, int, str]]:
-    rows: list[tuple[str, int, int, str, str]] = []
+def _submitted_windows(
+    log_dir: Path,
+    prefix: str,
+    target_project: str,
+) -> set[tuple[str, int, int, str, str, str]]:
+    """读取仍受保护的任务，任务键中包含资产路径和目标 project。
+
+    仅按瓦片编号去重会导致切换账号时误以为任务已经提交；外部共享
+    GEDI 资产也可能使用相同的瓦片编号，所以必须把两项都纳入任务键。
+    """
+    rows: list[tuple[str, int, int, str, str, str, str]] = []
     for path in sorted(log_dir.glob(f"{prefix}_*.csv")):
         try:
             frame = pd.read_csv(path)
@@ -66,13 +82,36 @@ def _submitted_windows(log_dir: Path, prefix: str) -> set[tuple[str, int, int, s
         frame = frame[(frame["status"] == "submitted") & frame["task_id"].notna()]
         for row in frame.itertuples(index=False):
             chunk_id = str(row.chunk_id) if hasattr(row, "chunk_id") and pd.notna(row.chunk_id) else ""
-            rows.append((str(row.tile_id), int(row.year_start), int(row.year_end), chunk_id, str(row.task_id)))
+            asset_id = str(row.asset_id) if hasattr(row, "asset_id") and pd.notna(row.asset_id) else ""
+            # 旧日志没有 target_project。阶段 1 或旧单账号阶段 2 可从 asset 路径推断。
+            row_project = (
+                str(row.target_project)
+                if hasattr(row, "target_project") and pd.notna(row.target_project)
+                else asset_project_id(asset_id)
+            )
+            rows.append(
+                (
+                    str(row.tile_id),
+                    int(row.year_start),
+                    int(row.year_end),
+                    chunk_id,
+                    asset_id,
+                    row_project or "",
+                    str(row.task_id),
+                )
+            )
+    # 先剔除其他账号的日志，避免当前凭证去查询无权访问的旧任务 ID。
+    rows = [row for row in rows if row[5] == target_project]
     try:
-        states = _task_states(sorted({row[4] for row in rows}))
+        states = _task_states(sorted({row[6] for row in rows}))
     except Exception:
-        states = {row[4]: "UNKNOWN" for row in rows}
+        states = {row[6]: "UNKNOWN" for row in rows}
     protected = {"READY", "RUNNING", "COMPLETED", "CANCEL_REQUESTED", "UNKNOWN"}
-    return {(tile, start, end, chunk_id) for tile, start, end, chunk_id, task_id in rows if states.get(task_id) in protected}
+    return {
+        (tile, start, end, chunk_id, asset_id, project)
+        for tile, start, end, chunk_id, asset_id, project, task_id in rows
+        if states.get(task_id) in protected
+    }
 
 
 def _selected_years(cfg: dict, years: list[int] | None) -> list[int]:
@@ -104,7 +143,8 @@ def export_gedi_assets(
     folder = point_asset_folder(cfg)
     ensure_folder(folder)
     assets = list_child_assets(folder)
-    existing = _submitted_windows(log_dir, "gedi_asset_tasks")
+    project = str(cfg["gee"]["project"])
+    existing = _submitted_windows(log_dir, "gedi_asset_tasks", project)
     max_new = int(cfg["sampling"].get("max_new_tasks", 20))
     submitted = 0
     rows: list[dict] = []
@@ -119,8 +159,8 @@ def export_gedi_assets(
             label = str(year_start) if year_start == year_end else f"{year_start}_{year_end}"
             window = (tile_id, year_start, year_end)
             asset_id = f"{folder}/gedi_points_{tile_id}_{label}"
-            if asset_id in assets or (*window, "") in existing:
-                rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "skipped_existing", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "asset_id": asset_id})
+            if asset_id in assets or (*window, "", asset_id, project) in existing:
+                rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "skipped_existing", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "asset_id": asset_id, "target_project": project})
                 continue
             points = build_native_tile_gedi_points(
                 region=tile_region(tile_id),
@@ -136,7 +176,7 @@ def export_gedi_assets(
             task = ee.batch.Export.table.toAsset(collection=points, description=description, assetId=asset_id)
             task.start()
             submitted += 1
-            rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "submitted", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "asset_id": asset_id, "task_id": task.id, "description": description})
+            rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "submitted", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "asset_id": asset_id, "target_project": project, "task_id": task.id, "description": description})
         if submitted >= max_new:
             break
     out = log_dir / f"gedi_asset_tasks_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -151,6 +191,7 @@ def export_alpha_samples(
     years: list[int] | None = None,
     year_mode: str | None = None,
     max_chunks: int | None = None,
+    source_asset_folder: str | None = None,
 ) -> None:
     ee_auth.initialize(cfg["gee"]["project"], auth_mode=cfg["gee"].get("auth_mode", "localhost"))
     index_dir = resolve_path(cfg, "index_dir")
@@ -174,9 +215,16 @@ def export_alpha_samples(
             "请把 sampling.staged_point_year_mode 设为 all。"
         )
     source_start, source_end = source_windows[0]
-    folder = point_asset_folder(cfg)
-    assets = list_child_assets(folder)
-    existing = _submitted_windows(log_dir, "alpha_sample_tasks")
+    project = str(cfg["gee"]["project"])
+    folder = source_point_asset_folder(cfg, source_asset_folder)
+    try:
+        assets = list_child_assets(folder)
+        folder_listing_error = None
+    except Exception as exc:
+        # 已共享单个表资产而没有共享父目录时仍可运行，后面逐个检查资产即可。
+        assets = None
+        folder_listing_error = str(exc)
+    existing = _submitted_windows(log_dir, "alpha_sample_tasks", project)
     max_new = int(cfg["sampling"].get("max_new_tasks", 20))
     drive_folder = cfg["sampling"].get("drive_folder", "mangrove_gedi_alphaearth_samples")
     submitted = 0
@@ -187,6 +235,8 @@ def export_alpha_samples(
     planned_dir = index_dir / "alpha_spatial_chunks"
     console.rule("阶段 2：从 GEDI 表资产按自适应空间块采样 AlphaEarth")
     console.print(f"tiles: {len(tiles)}; windows: {windows}; source folder: {folder}")
+    if folder_listing_error:
+        console.print("[yellow]无法列举来源目录，将逐个检查资产读取权限。[/yellow]")
     for row in tqdm(tiles.itertuples(index=False), total=len(tiles), desc="采样 AlphaEarth"):
         if submitted >= max_new or (max_chunks is not None and submitted >= max_chunks):
             break
@@ -200,9 +250,18 @@ def export_alpha_samples(
             window = (tile_id, year_start, year_end)
             source_label = str(source_start) if source_start == source_end else f"{source_start}_{source_end}"
             asset_id = f"{folder}/gedi_points_{tile_id}_{source_label}"
-            if asset_id not in assets:
-                rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "waiting_for_asset", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "asset_id": asset_id})
-                continue
+            if assets is not None and asset_id not in assets:
+                _, read_error = readable_asset(asset_id)
+                if read_error:
+                    rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "source_asset_unavailable", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "asset_id": asset_id, "target_project": project, "error": read_error})
+                    console.print(f"[yellow]无法读取 GEDI 资产，请确认已共享给当前账号: {asset_id}[/yellow]")
+                    continue
+            elif assets is None:
+                _, read_error = readable_asset(asset_id)
+                if read_error:
+                    rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "source_asset_unavailable", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "asset_id": asset_id, "target_project": project, "error": read_error})
+                    console.print(f"[yellow]无法读取 GEDI 资产，请确认已共享给当前账号: {asset_id}[/yellow]")
+                    continue
             plan_name = f"{tile_id}_{label}_max{max_points}.csv"
             points = ee.FeatureCollection(asset_id)
             if year_start != source_start or year_end != source_end:
@@ -219,8 +278,8 @@ def export_alpha_samples(
                 if submitted >= max_new or (max_chunks is not None and submitted >= max_chunks):
                     break
                 chunk_id = str(chunk.chunk_id)
-                if (*window, chunk_id) in existing:
-                    rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "skipped_existing", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "chunk_id": chunk_id, "asset_id": asset_id})
+                if (*window, chunk_id, asset_id, project) in existing:
+                    rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "skipped_existing", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "chunk_id": chunk_id, "asset_id": asset_id, "target_project": project})
                     continue
                 samples = build_alpha_sample_collection_from_asset(
                     points_asset_id=asset_id,
@@ -236,7 +295,7 @@ def export_alpha_samples(
                 task = ee.batch.Export.table.toDrive(collection=samples, description=prefix[:100], folder=drive_folder, fileNamePrefix=prefix, fileFormat="CSV", selectors=selectors())
                 task.start()
                 submitted += 1
-                rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "submitted", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "chunk_id": chunk_id, "point_count": int(chunk.point_count), "asset_id": asset_id, "task_id": task.id, "description": prefix[:100], "drive_folder": drive_folder})
+                rows.append({"time": datetime.now().isoformat(timespec="seconds"), "status": "submitted", "tile_id": tile_id, "year_start": year_start, "year_end": year_end, "chunk_id": chunk_id, "point_count": int(chunk.point_count), "asset_id": asset_id, "target_project": project, "task_id": task.id, "description": prefix[:100], "drive_folder": drive_folder})
             if submitted >= max_new or (max_chunks is not None and submitted >= max_chunks):
                 break
         if submitted >= max_new or (max_chunks is not None and submitted >= max_chunks):

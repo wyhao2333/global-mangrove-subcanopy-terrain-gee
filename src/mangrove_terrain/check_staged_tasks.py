@@ -7,12 +7,13 @@ import pandas as pd
 from rich.console import Console
 
 from . import ee_auth
+from .asset_utils import asset_project_id
 from .config import resolve_path
 
 console = Console()
 
 
-def _read_stage(log_dir, prefix: str, stage: str) -> pd.DataFrame:
+def _read_stage(log_dir, prefix: str, stage: str, target_project: str) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for path in sorted(log_dir.glob(f"{prefix}_*.csv")):
         try:
@@ -22,6 +23,17 @@ def _read_stage(log_dir, prefix: str, stage: str) -> pd.DataFrame:
         if "task_id" not in frame.columns:
             continue
         frame = frame[frame["task_id"].notna()].copy()
+        if "target_project" in frame.columns:
+            frame = frame[frame["target_project"].astype(str) == target_project]
+        elif "asset_id" in frame.columns:
+            # 兼容旧日志：旧单账号流程的来源资产 project 就是任务 project。
+            inferred = frame["asset_id"].map(asset_project_id)
+            frame = frame[inferred == target_project]
+        else:
+            # 无法确认归属的旧日志不应干扰当前多账号任务检查。
+            continue
+        if frame.empty:
+            continue
         frame["stage"] = stage
         frames.append(frame)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
@@ -31,8 +43,8 @@ def run(cfg: dict) -> None:
     ee_auth.initialize(cfg["gee"]["project"], auth_mode=cfg["gee"].get("auth_mode", "localhost"))
     log_dir = resolve_path(cfg, "log_dir")
     frames = [
-        _read_stage(log_dir, "gedi_asset_tasks", "stage1_gedi_assets"),
-        _read_stage(log_dir, "alpha_sample_tasks", "stage2_alpha_samples"),
+        _read_stage(log_dir, "gedi_asset_tasks", "stage1_gedi_assets", cfg["gee"]["project"]),
+        _read_stage(log_dir, "alpha_sample_tasks", "stage2_alpha_samples", cfg["gee"]["project"]),
     ]
     frames = [frame for frame in frames if not frame.empty]
     if not frames:

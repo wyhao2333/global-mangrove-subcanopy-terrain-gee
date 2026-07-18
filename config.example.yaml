@@ -45,6 +45,10 @@ sampling:
   staged_point_year_mode: all
   # 阶段2：从表资产按自适应空间块采样AlphaEarth。默认全期，但每块点数受限。
   staged_alpha_year_mode: all
+  # 阶段2 GEDI 点表来源。留空表示当前 project 的 asset_root/gedi_points；
+  # 多账号时填入已共享给当前账号的完整目录，例如：
+  # projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
+  gedi_source_asset_folder: null
   alpha_max_points_per_task: 10000
   alpha_min_chunk_degrees: 0.0625
 
