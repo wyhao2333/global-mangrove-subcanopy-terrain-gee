@@ -3,6 +3,7 @@ from __future__ import annotations
 
 GUIDES = {
     "auth": ("新增或更新 GEE 账号凭证", "程序会显示授权链接，请在指定浏览器完成 Earth Engine 认证。"),
+    "grant_source_access": ("批量授予 GEDI 来源资产读取权限", "必须使用来源资产拥有者账号认证。程序先检查目录和全部表资产，再要求输入 GRANT 才会写入权限。"),
     "check": ("检查 GEE 环境", "将检查当前账号、GEDI、AlphaEarth 和 GMW 公共数据集是否可用。"),
     "prepare": ("生成 GMW 索引", "将读取本地 GMW 矢量，生成全球原生GEDI瓦片与空间块索引。"),
     "validate": ("验证采样一致性", "将比较旧流程和新流程的小样本字段，任何差异都会报错。"),

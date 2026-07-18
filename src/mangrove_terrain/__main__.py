@@ -6,6 +6,7 @@ import sys
 from . import (
     aggregate_samples,
     alpha_asset_scheduler,
+    asset_access,
     check_native_tasks,
     check_staged_tasks,
     ee_auth,
@@ -48,6 +49,16 @@ def main() -> None:
     p_auth.add_argument("--project", dest="auth_project", default=None, help="要保存凭证并验证权限的 GEE project ID")
     p_auth.add_argument("--interactive", action="store_true", help="以中文提示输入 GEE project ID")
     p_auth.add_argument("--auth-mode", default="localhost:0", help="本机回调地址，默认 localhost:0 自动选端口")
+
+    p_grant = sub.add_parser("grant-source-asset-access", help="批量授予来源 GEDI 表资产读取权限")
+    p_grant.add_argument("--owner-project", default=None, help="来源资产拥有者认证所使用的 GEE project")
+    p_grant.add_argument("--source-asset-folder", default=None, help="要授权的 gedi_points 目录完整路径")
+    recipient_group = p_grant.add_mutually_exclusive_group()
+    recipient_group.add_argument("--recipient", default=None, help="接收 Reader 权限的 Google 账号邮箱")
+    recipient_group.add_argument("--anyone", action="store_true", help="设为所有人可读")
+    p_grant.add_argument("--apply", action="store_true", help="真正写入资产 ACL；默认仅预览")
+    p_grant.add_argument("--yes", action="store_true", help="非交互式 --apply 的二次确认")
+    p_grant.add_argument("--interactive", action="store_true", help="以中文提示输入来源账号、目录和授权对象")
 
     p_prepare = sub.add_parser("prepare-gmw", help="切分 GMW 2020 红树林面")
     p_prepare.add_argument("--all", action="store_true", help="全量切分；不加时默认只生成 5 个 smoke-test shards")
@@ -147,6 +158,17 @@ def main() -> None:
     try:
         if args.command == "inspect-gee":
             inspect_gee.run(cfg)
+        elif args.command == "grant-source-asset-access":
+            asset_access.run(
+                cfg,
+                owner_project=args.owner_project,
+                source_asset_folder=args.source_asset_folder,
+                recipient=args.recipient,
+                anyone=args.anyone,
+                apply=args.apply,
+                yes=args.yes,
+                interactive=args.interactive,
+            )
         elif args.command == "prepare-gmw":
             prepare_gmw.run(
                 cfg,
