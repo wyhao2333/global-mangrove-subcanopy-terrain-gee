@@ -49,6 +49,14 @@ sampling:
   # 多账号时填入已共享给当前账号的完整目录，例如：
   # projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
   gedi_source_asset_folder: null
+  # 步骤4b自动调度：首次提交30块；每10分钟检查一次；READY+RUNNING不超过10块时补交30块。
+  alpha_initial_batch: 30
+  alpha_refill_batch: 30
+  alpha_poll_minutes: 10
+  alpha_active_threshold: 10
+  # 步骤4c把已经完成的AlphaEarth表资产导出到当前账号Google Drive的目录。
+  alpha_drive_folder: mangrove_gedi_alphaearth_samples
+  alpha_drive_max_new_tasks: 30
   alpha_max_points_per_task: 10000
   alpha_min_chunk_degrees: 0.0625
 

@@ -39,12 +39,34 @@ def _read_stage(log_dir, prefix: str, stage: str, target_project: str) -> pd.Dat
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+def _read_alpha_asset_jobs(log_dir, target_project: str) -> pd.DataFrame:
+    """读取步骤4b资产调度清单，使独立状态检查也能看到自动任务。"""
+    frames: list[pd.DataFrame] = []
+    for path in sorted(log_dir.glob("alpha_asset_jobs_*.csv")):
+        try:
+            frame = pd.read_csv(path)
+        except Exception:
+            continue
+        required = {"target_project", "last_task_id", "status"}
+        if not required.issubset(frame.columns):
+            continue
+        frame = frame[frame["target_project"].astype(str) == target_project].copy()
+        frame = frame[frame["last_task_id"].notna()]
+        if frame.empty:
+            continue
+        frame = frame.rename(columns={"last_task_id": "task_id", "status": "asset_scheduler_status"})
+        frame["stage"] = "stage2_alpha_assets"
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 def run(cfg: dict) -> None:
     ee_auth.initialize(cfg["gee"]["project"], auth_mode=cfg["gee"].get("auth_mode", "localhost"))
     log_dir = resolve_path(cfg, "log_dir")
     frames = [
         _read_stage(log_dir, "gedi_asset_tasks", "stage1_gedi_assets", cfg["gee"]["project"]),
         _read_stage(log_dir, "alpha_sample_tasks", "stage2_alpha_samples", cfg["gee"]["project"]),
+        _read_alpha_asset_jobs(log_dir, cfg["gee"]["project"]),
     ]
     frames = [frame for frame in frames if not frame.empty]
     if not frames:

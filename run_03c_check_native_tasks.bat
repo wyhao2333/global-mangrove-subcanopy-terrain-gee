@@ -8,7 +8,8 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 set PYTHONPATH=%~dp0src
-echo Checking native GEDI tile export tasks...
+set PYTHONUTF8=1
+".venv\Scripts\python.exe" -m mangrove_terrain windows-guide native_status
 ".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml check-native-tasks
 echo.
 pause

@@ -48,6 +48,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "staged_alpha_year_mode": "all",
         # 留空时从当前 project 的阶段 1 目录读取；可改为已共享的完整外部目录。
         "gedi_source_asset_folder": None,
+        # 阶段2自动调度：任务先导出为当前账号的 GEE Table Asset，再由步骤4c导出到Drive。
+        "alpha_initial_batch": 30,
+        "alpha_refill_batch": 30,
+        "alpha_poll_minutes": 10,
+        "alpha_active_threshold": 10,
+        "alpha_drive_folder": "mangrove_gedi_alphaearth_samples",
+        "alpha_drive_max_new_tasks": 30,
         "alpha_max_points_per_task": 10000,
         "alpha_min_chunk_degrees": 0.0625,
     },

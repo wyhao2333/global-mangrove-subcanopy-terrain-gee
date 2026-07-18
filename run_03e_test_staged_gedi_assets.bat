@@ -8,8 +8,10 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 set PYTHONPATH=%~dp0src
-echo Stage 1 test: one complete 6-degree GEDI point asset for 2019-2025.
+set PYTHONUTF8=1
+".venv\Scripts\python.exe" -m mangrove_terrain windows-guide stage1_test --confirm
+if errorlevel 2 goto done
 ".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml export-gedi-assets --tiles 102W_012N --years 2019-2025 --year-mode all
-echo Use run_03d_check_staged_tasks.bat to inspect the task.
+:done
 echo.
 pause

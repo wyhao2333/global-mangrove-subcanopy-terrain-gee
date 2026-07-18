@@ -8,6 +8,8 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 set PYTHONPATH=%~dp0src
+set PYTHONUTF8=1
+".venv\Scripts\python.exe" -m mangrove_terrain windows-guide check
 ".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml inspect-gee
 echo.
 pause

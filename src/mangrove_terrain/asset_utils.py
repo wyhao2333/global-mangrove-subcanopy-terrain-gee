@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import ee
 
 
@@ -22,6 +24,16 @@ def source_point_asset_folder(cfg: dict, override: str | None = None) -> str:
     configured = cfg.get("sampling", {}).get("gedi_source_asset_folder")
     folder = override or configured or point_asset_folder(cfg)
     return str(folder).strip().rstrip("/")
+
+
+def source_folder_key(source_folder: str) -> str:
+    """生成稳定的来源标识，避免不同共享目录写入同一批 AlphaEarth 资产。"""
+    return hashlib.sha256(source_folder.encode("utf-8")).hexdigest()[:12]
+
+
+def alpha_sample_asset_folder(cfg: dict, source_folder: str) -> str:
+    """返回当前账号保存阶段2 AlphaEarth 表资产的目录。"""
+    return f"{asset_root(cfg)}/alpha_samples/source_{source_folder_key(source_folder)}"
 
 
 def asset_project_id(asset_id: str) -> str | None:
@@ -49,8 +61,17 @@ def ensure_folder(asset_id: str) -> None:
 
 
 def list_child_assets(parent: str) -> dict[str, dict]:
-    response = ee.data.listAssets({"parent": parent})
-    return {str(item["id"]): item for item in response.get("assets", [])}
+    """列出文件夹全部直接子资产，自动处理 Earth Engine 的分页结果。"""
+    assets: dict[str, dict] = {}
+    request: dict[str, str | int] = {"parent": parent, "pageSize": 1000}
+    while True:
+        response = ee.data.listAssets(request)
+        assets.update({str(item["id"]): item for item in response.get("assets", [])})
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+        request["pageToken"] = str(page_token)
+    return assets
 
 
 def readable_asset(asset_id: str) -> tuple[dict | None, str | None]:

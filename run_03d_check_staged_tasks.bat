@@ -8,7 +8,8 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 set PYTHONPATH=%~dp0src
-echo Checking staged GEDI asset and AlphaEarth export tasks...
+set PYTHONUTF8=1
+".venv\Scripts\python.exe" -m mangrove_terrain windows-guide stage2_status
 ".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml check-staged-tasks
 echo.
 pause

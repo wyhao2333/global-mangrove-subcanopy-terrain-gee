@@ -5,9 +5,11 @@ import sys
 
 from . import (
     aggregate_samples,
+    alpha_asset_scheduler,
     check_native_tasks,
     check_staged_tasks,
     ee_auth,
+    export_alpha_assets_to_drive,
     export_native_tiles,
     export_samples,
     export_staged,
@@ -15,6 +17,7 @@ from . import (
     modeling_placeholder,
     prepare_gmw,
     validate_native,
+    windows_ui,
 )
 from .config import ensure_output_dirs, load_config
 
@@ -37,8 +40,13 @@ def main() -> None:
 
     sub.add_parser("inspect-gee", help="检查 GEE 登录和数据集可访问性")
 
+    p_guide = sub.add_parser("windows-guide", help="供Windows双击脚本显示中文说明")
+    p_guide.add_argument("name", choices=sorted(windows_ui.GUIDES))
+    p_guide.add_argument("--confirm", action="store_true", help="显示中文确认提示")
+
     p_auth = sub.add_parser("auth-project", help="手动复制授权链接，保存指定 project 的独立 GEE 凭证")
-    p_auth.add_argument("--project", dest="auth_project", required=True, help="要保存凭证并验证权限的 GEE project ID")
+    p_auth.add_argument("--project", dest="auth_project", default=None, help="要保存凭证并验证权限的 GEE project ID")
+    p_auth.add_argument("--interactive", action="store_true", help="以中文提示输入 GEE project ID")
     p_auth.add_argument("--auth-mode", default="localhost:0", help="本机回调地址，默认 localhost:0 自动选端口")
 
     p_prepare = sub.add_parser("prepare-gmw", help="切分 GMW 2020 红树林面")
@@ -84,6 +92,26 @@ def main() -> None:
                 help="阶段 1 GEDI 点表目录；可填写其他账号已共享的完整 GEE asset 路径",
             )
 
+    p_scheduler = sub.add_parser("schedule-alpha-assets", help="步骤4b：自动调度 AlphaEarth 表资产导出")
+    p_scheduler.add_argument("--source-asset-folder", default=None, help="阶段1 GEDI 点表来源目录")
+    p_scheduler.add_argument("--tiles", nargs="*", default=None, help="仅处理指定原生瓦片")
+    p_scheduler.add_argument("--max-tiles", type=int, default=None, help="最多规划多少个原生瓦片")
+    p_scheduler.add_argument("--max-jobs", type=int, default=None, help="最多规划多少个空间块，用于测试")
+    p_scheduler.add_argument("--interactive", action="store_true", help="以中文提示输入执行project和来源资产目录")
+    p_scheduler.add_argument("--once", action="store_true", help="只执行一轮检查和提交，不进入10分钟循环")
+    p_scheduler.add_argument("--resubmit-chunks", nargs="*", default=None, help="人工指定重新提交的空间块ID")
+    p_scheduler.add_argument("--resubmit-failed", action="store_true", help="人工确认后重新提交失败清单中的全部任务")
+    p_scheduler.add_argument("--initial-batch", type=int, default=None)
+    p_scheduler.add_argument("--refill-batch", type=int, default=None)
+    p_scheduler.add_argument("--poll-minutes", type=float, default=None)
+    p_scheduler.add_argument("--active-threshold", type=int, default=None)
+
+    p_drive = sub.add_parser("export-alpha-assets-to-drive", help="步骤4c：将完成的 AlphaEarth 表资产导出到Drive")
+    p_drive.add_argument("--source-asset-folder", default=None, help="阶段1 GEDI 点表来源目录")
+    p_drive.add_argument("--interactive", action="store_true", help="以中文提示输入步骤4b使用的project和来源资产目录")
+    p_drive.add_argument("--max-new-tasks", type=int, default=None)
+    p_drive.add_argument("--force-assets", nargs="*", default=None, help="仅导出指定的阶段2表资产")
+
     sub.add_parser("check-native-tasks", help="检查原生瓦片 Drive 导出任务状态")
     sub.add_parser("check-staged-tasks", help="检查两阶段 GEDI 资产和 AlphaEarth 导出任务状态")
 
@@ -94,9 +122,18 @@ def main() -> None:
     sub.add_parser("model-placeholder", help="显示建模占位说明")
 
     args = parser.parse_args()
+    if args.command == "windows-guide":
+        if not windows_ui.run(args.name, confirm=args.confirm):
+            raise SystemExit(2)
+        return
     if args.command == "auth-project":
         try:
-            ee_auth.add_project_credentials(args.auth_project, auth_mode=args.auth_mode)
+            auth_project = args.auth_project
+            if args.interactive:
+                auth_project = input("请输入要认证的 GEE project ID，例如 ee-wyhao026: ").strip()
+            if not auth_project:
+                raise ValueError("必须提供 GEE project ID。")
+            ee_auth.add_project_credentials(auth_project, auth_mode=args.auth_mode)
         except Exception as exc:
             print(f"\n错误：{exc}", file=sys.stderr)
             raise SystemExit(1) from exc
@@ -165,6 +202,30 @@ def main() -> None:
                 year_mode=args.year_mode,
                 max_chunks=args.max_chunks,
                 source_asset_folder=args.source_asset_folder,
+            )
+        elif args.command == "schedule-alpha-assets":
+            alpha_asset_scheduler.run(
+                cfg,
+                source_asset_folder=args.source_asset_folder,
+                tile_ids=args.tiles,
+                max_tiles=args.max_tiles,
+                max_jobs=args.max_jobs,
+                interactive=args.interactive,
+                once=args.once,
+                resubmit_chunks=args.resubmit_chunks,
+                resubmit_failed=args.resubmit_failed,
+                initial_batch=args.initial_batch,
+                refill_batch=args.refill_batch,
+                poll_minutes=args.poll_minutes,
+                active_threshold=args.active_threshold,
+            )
+        elif args.command == "export-alpha-assets-to-drive":
+            export_alpha_assets_to_drive.run(
+                cfg,
+                source_asset_folder=args.source_asset_folder,
+                max_new_tasks=args.max_new_tasks,
+                force_assets=args.force_assets,
+                interactive=args.interactive,
             )
         elif args.command == "aggregate":
             aggregate_samples.run(cfg, input_dir=args.input_dir, output_path=args.output)
