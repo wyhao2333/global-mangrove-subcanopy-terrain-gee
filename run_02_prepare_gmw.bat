@@ -8,7 +8,8 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 set PYTHONPATH=%~dp0src
-echo This step may take a long time for the full GMW shapefile.
-".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml prepare-gmw --all
+set PYTHONUTF8=1
+".venv\Scripts\python.exe" -m mangrove_terrain windows-guide prepare
+".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml prepare-gmw --native-only
 echo.
 pause

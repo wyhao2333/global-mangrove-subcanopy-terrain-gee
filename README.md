@@ -9,6 +9,12 @@ GMW 2020 红树林范围
   -> 本地按 10 m embedding 像元做 GEDI 高程中值聚合
 ```
 
+正式流程采用“两阶段加下载”：阶段1只提取并保存全部GEDI月度脚印为GEE表资产；步骤4b从表资产按空间块采样AlphaEarth并保存为当前账号的GEE表资产；步骤4c再把已验证完成的表资产导出到Google Drive。这避免把几十个月的GEDI点和全球AlphaEarth均值一次性放进同一张计算图，并用真实资产作为可恢复的完成标记。
+
+推荐流程按 GEDI 原生 6°瓦片运行，全球 GMW 范围约 201 个瓦片。GMW 本地 shp 用来生成瓦片索引和一致性验证；GEE 计算时使用同版本的 GMW v3 2020 公共栅格掩膜，避免反复计算一百多万个复杂矢量面。索引按 GMW 矢量范围与格网的相交关系生成，而不是只看面中心点，因此跨 1° 或 6° 边界的红树林不会被遗漏。
+
+项目已核验这 201 个瓦片在 GEE 中全部有对应 GEDI 数据，2019-2025 合计 12,688 张月度瓦片影像，每个空间瓦片包含 55-64 个月；内部仍逐月提取，不做时间合成。
+
 本项目只做数据制备。机器学习建模和调参暂时不做，后续可以接 Python、R 或 GEE 模型。
 
 ## 重要提醒
@@ -80,6 +86,14 @@ data/raw/gmw_v3/gmw_v3_2020_vec.prj
 
 这些文件很大，不会提交到 GitHub。
 
+GEE 采样默认读取公共资产：
+
+```text
+projects/earthengine-legacy/assets/projects/sat-io/open-datasets/GMW/extent/GMW_V3
+```
+
+使用其中的 `gmw_v3_2020` 栅格。该资产来自 [GMW v3 社区目录](https://gee-community-catalog.org/projects/mangrove/)，与本地 GMW 2020 shp 属于同一数据版本；如果社区资产将来迁移，可以在 `config.yaml` 中替换为自己的 GMW 栅格资产。
+
 ## 最简单运行方式：双击运行
 
 如果你完全不会 PowerShell，按下面顺序双击文件即可。
@@ -122,9 +136,33 @@ gee:
 
 paths:
   gmw_shp: data/raw/gmw_v3/gmw_v3_2020_vec.shp
+
+sampling:
+  alpha_initial_batch: 30
+  alpha_refill_batch: 30
+  alpha_poll_minutes: 10
+  alpha_active_threshold: 10
 ```
 
-如果你要换 GEE project，就改 `project`。
+如果你要换 GEE project，可以改 `project`；更方便的方法见下一节，运行时通过 `--project` 临时切换，不会修改此文件。
+
+### 2.1 新增 GEE 账号凭证（不自动打开浏览器）
+
+双击 `run_00_add_gee_account.bat`，输入新的 GEE project ID，例如 `ee-wyhao026`。程序会在黑色窗口打印 Earth Engine 授权链接，**不会**自动打开默认浏览器。
+
+请把链接复制到已经登录目标 Google 账号的浏览器窗口，完成授权后保持黑色窗口运行，直到显示 project 验证成功。凭证会自动保存为按 project 命名的文件：
+
+```text
+%USERPROFILE%\.config\earthengine\projects\<project-id>.json
+```
+
+例如 `ee-wyhao026` 对应：
+
+```text
+%USERPROFILE%\.config\earthengine\projects\ee-wyhao026.json
+```
+
+每个 project 使用独立凭证。后续运行程序时填入不同 project 即可切换账号，不需要手工复制、覆盖或删除凭证。若只是第一次普通运行 `run_01_check_gee.bat`，没有凭证时仍会使用原有的自动浏览器认证方式。
 
 ### 3. 双击 `run_01_check_gee.bat`
 
@@ -145,6 +183,7 @@ paths:
 
 - 窗口里能看到 GEDI image count。
 - 能看到 AlphaEarth band count 为 `64`。
+- 能看到 GMW 2020 raster bands 为 `['b1']`。
 
 常见失败：
 
@@ -162,12 +201,13 @@ paths:
 
 - 读取 GMW 2020 shp。
 - 不用 GeoPandas。
-- 把全球红树林碎面切成很多小 GeoJSON shards。
-- 每个 shard 默认控制在 2.0 MB 左右，避免 GEE 请求过大，同时减少导出文件数。
+- 生成 GEDI 原生 6°瓦片索引。
+- 默认只额外生成 1 个旧式 GeoJSON shard，用于新旧流程一致性验证。
+- 推荐流程不再生成约 2,200 个正式采样 shard。
 
 大概多久：
 
-- 全量 GMW 可能需要几十分钟到数小时。
+- 需要扫描约 107 万个 GMW 要素边界，通常需要几分钟到几十分钟。
 
 成功后会生成：
 
@@ -176,39 +216,38 @@ data/index/gmw_bounds_index.csv
 data/index/gmw_1deg_cells.csv
 data/index/gmw_6deg_tiles.csv
 data/index/aoi_shards.csv
-data/shards/*.geojson
+data/shards/*.geojson（默认只有 1 个验证 shard）
 ```
 
 可以重复运行吗：
 
-- 可以。会覆盖同名索引和 shard。
+- 可以。会覆盖同名索引和验证 shard。
 
-如果你只想快速测试，不想全量切分，可以用 PowerShell 方式运行小样本命令，见后文。
+旧式流程如果确实需要约 2,200 个 GeoJSON shards，可在 PowerShell 中手工运行 `prepare-gmw --all`；推荐原生瓦片流程不需要。
 
 ### 5. 双击 `run_03_sample_smoke_test.bat`
 
 作用：
 
-- 只用 1 个 shard。
-- 只跑 2020 年。
-- 把 GEDI + AlphaEarth 小样本直接下载到本地。
+- 使用同一个小面和 2020 年 3 月有观测的数据，分别运行旧流程和新原生瓦片流程。
+- 逐行比较 GEDI 影像 ID、月份、中心坐标、高程、AlphaEarth 像元坐标和 A00-A63。
+- 任意脚印丢失、增加或数值改变都会直接报错，不允许进入全量导出。
 
 注意：
 
-- 这一步只是连通性测试，样本数会很少，不能代表全球红树林 2019-2025 年全量 GEDI 样本量。
-- 小样本行数少通常是因为 shard 很小、只取 2020 年、且只保留 `quality_flag == 1`、`degrade_flag == 0` 的有效 GEDI 像元。
+- 当前真实验证结果为 57/57 行完全一致，所有数值字段最大差值为 0。
+- 小面只有 57 行不代表全球样本量，只用于证明新方法没有改变采样定义。
 
 成功后会生成：
 
 ```text
-outputs/raw_samples/*.parquet
-logs/sample_tasks_*.csv
+logs/native_validation_*.json
 ```
 
 大概多久：
 
-- 通常几分钟到几十分钟。
-- 如果 GEE 忙，可能更久。
+- 当前测试约 1 分钟；如果 GEE 忙，可能更久。
+- 不建议在完整瓦片任务占满同一 GEE project 时并行跑验证；验证可能由约 1 分钟延长到数分钟。
 
 可以重复运行吗：
 
@@ -218,54 +257,161 @@ logs/sample_tasks_*.csv
 
 作用：
 
-- 提交 1 个真实 `shard-year_window` 到 Google Drive。
-- 用来测试当前 GMW 分块大小是否能被 GEE 正常接收和执行。
-- 默认使用第 1 个 shard 的 2019-2025 全部 GEDI 月度观测，属于正式 Drive 导出任务，不是本地 `getInfo` 小样本。
+- 提交一个完整 GEDI 原生 6°瓦片的直接联合采样任务。
+- 该命令只用于和两阶段流程做对照，或者两阶段流程的异常回退。
 
 什么时候需要看这一步：
 
-- 第一次换电脑、换 GEE project、换 GMW 数据或调整 `gmw.max_geojson_mb` 后，建议先跑这一步。
-- 如果这个任务失败，可以把 `config.yaml` 里的 `gmw.max_geojson_mb` 从 `2.0` 降到 `1.5` 或 `0.8`，重新运行 `run_02_prepare_gmw.bat` 后再测试。
+- 第一次换电脑、换 GEE project 或更换数据源后，建议先跑这一步。
+- 双击 `run_03c_check_native_tasks.bat` 查看状态与真实耗时。
 
-本项目当前实测：
-
-- 约 0.76 MB 的真实 GMW shard，2019-2025 全期任务已完成，用时约 48.8 分钟。
-- 约 1.53 MB 的真实 GMW shard，2019-2025 全期任务已完成，用时约 38.0 分钟。
-- 约 2.02 MB 的真实 GMW shard，2019-2025 全期任务已完成，用时约 32.2 分钟。
-- 约 3.05 MB 的真实 GMW shard 可以提交，但 31 分钟后仍未明显推进，已取消；暂不作为默认值。
+直接联合流程中，`102W_012N`完整6°瓦片耗时33.8分钟，但高密度瓦片出现计算图过大和高EECU问题，因此不再作为正式默认流程。
 
 可以重复运行吗：
 
-- 可以。默认会读取日志并跳过已经提交过的同一 shard-year_window。
+- 可以。READY、RUNNING、COMPLETED 任务会跳过；FAILED 或 CANCELLED 任务允许重新提交。
 
-### 7. 双击 `run_04_sample_all.bat`
+### 6.1 双击 `run_03c_check_native_tasks.bat`
+
+检查所有原生瓦片任务状态、失败原因、EECU 和已完成任务耗时。结果写入：
+
+```text
+logs/native_task_status_latest.csv
+```
+
+### 7. 双击 `run_03e_test_staged_gedi_assets.bat`
 
 作用：
 
-- 正式提交全量采样任务。
-- 默认按 shard 分批提交，每个 shard 导出 2019-2025 全部 GEDI 月度观测。
-- 默认导出到 Google Drive，而不是一次性拉回本地。
-- GEDI 会按每张月度影像分别采样后合并，不做 mosaic、不做同位置去重；同一 25 m 或 10 m 位置跨月份重复出现会保留下来。
-- 默认每次最多新提交 `max_new_tasks` 个任务；重复运行时会读取 `logs/sample_tasks_*.csv`，已经登记过的 shard-year_window 会自动跳过。
-- 正式运行前必须先完成 `run_02_prepare_gmw.bat` 的全量切分；如果索引里只有几个 smoke shards，程序会直接报错提醒。
+- 提交一个完整6°瓦片的2019-2025 GEDI点表资产。
+- 不计算AlphaEarth，只保留GEDI高程、质量字段、月份、影像ID和中心位置。
 
-当前文件数估算：
+真实测试结果：
 
-- `max_geojson_mb = 2.0` 时，全量约 `2,200-2,300` 个 CSV。
-- `max_geojson_mb = 0.8` 时，全量约 `3,800-3,900` 个 CSV。
-- 如果按旧方案 `shard × year` 拆分，会变成约 `26,000+` 个 CSV，因此现在默认不再按年拆。
-- 如果个别 2.0 MB shard 失败，可降到 `1.5`，全量约 `2,600` 个 CSV；再不稳则降到 `0.8`。
+- `102W_012N`阶段1任务约4.1分钟完成。
+- EECU约0.92秒；另一个已完成瓦片约0.64秒。
 
-为什么全量默认导出到 Google Drive：
+资产位置：
 
-- 全量可能有几百万到一千多万条记录。
-- 直接本地 `getInfo` 很容易超时或失败。
-- Google Drive table export 更稳。
+```text
+projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points/
+```
+
+### 8. 双击 `run_03f_test_staged_alpha.bat`
+
+作用：
+
+- 从阶段1的GEDI表资产中选取一个空间块。
+- 每块默认不超过10,000个脚印。
+- AlphaEarth均值先按空间块过滤，只计算覆盖该块的Embedding影像。
+
+真实测试结果：
+
+- `102W_012N`的2,475个脚印块约12秒完成。
+- EECU约440秒。
+- 对照的旧阶段2全局均值任务失败，并消耗约38,098-51,104 EECU秒。
+
+### 9. 双击 `run_03d_check_staged_tasks.bat`
+
+检查阶段1资产任务和阶段2 AlphaEarth任务。结果写入：
+
+```text
+logs/staged_task_status_latest.csv
+```
+
+### 10. 双击 `run_04_sample_all.bat`
+
+作用：
+
+- 正式提交阶段1 GEDI表资产任务。
+- 程序会以中文询问是否继续；输入 `Y` 确认提交，直接回车或输入其他内容取消。
+- 默认按约201个GEDI原生6°瓦片分批保存表资产，每个资产包含2019-2025全部月度观测。
+- GEDI仍按每张月度影像分别提取，不做mosaic、不做同位置去重。
+- 默认每次最多新提交 `max_new_tasks` 个任务；GEE 通常只同时运行约 3 个，其余保持 READY 排队。
+- 重复运行会读取 `logs/gedi_asset_tasks_*.csv`；已经存在或正在运行的资产不会重复提交。
+- 正式运行前必须完成 `run_02_prepare_gmw.bat`，生成 `gmw_6deg_tiles.csv`。
+
+阶段1预计约201个GEE表资产，不会生成201个包含64个AlphaEarth波段的超大任务。
+
+### 11. 双击 `run_04b_sample_alpha_all.bat`
+
+作用：
+
+- 等阶段1资产完成后，从资产中按空间块采样AlphaEarth，输出为**当前执行账号自己的GEE Table Asset**。
+- 默认每个空间块最多10,000个GEDI脚印；首批提交30块，每10分钟检查一次；当 `READY + RUNNING` 总数不超过10时，再补交30块。
+- 每个任务只计算当前空间块覆盖的AlphaEarth影像。黑色窗口会持续运行；按 `Ctrl+C` 可以安全停止，重新双击会从任务清单恢复。
+- 脚本会用中文询问“执行 project”和“GEDI来源目录”；都直接回车则使用 `config.yaml` 的当前 project 和默认目录。
+
+如果账号 A 已完成阶段1，目录为：
+
+```text
+projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
+```
+
+请先在 Earth Engine Assets 页面把这个文件夹（或所有子表资产）共享给账号 B，至少给读取权限。然后双击 `run_04b_sample_alpha_all.bat`，第一个输入框填账号 B 的 project，例如 `ee-wyhao026`，第二个输入框填上面的完整目录。步骤4b会把结果保存到 B 自己的资产目录：
+
+```text
+projects/<账号B的project>/assets/global_mangrove_subcanopy_terrain/alpha_samples/source_<来源哈希>/
+```
+
+也可以写入 `config.yaml`：
+
+```yaml
+gee:
+  project: ee-wyhao026  # 步骤4b执行和表资产保存的账号
+
+sampling:
+  gedi_source_asset_folder: projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
+```
+
+如果共享权限不足，程序会显示无法读取的资产路径，不会提交错误任务，并写入 `logs/alpha_asset_source_issues_<project>_<来源哈希>.csv`。任务清单保存在 `logs/alpha_asset_jobs_<project>_<来源哈希>.csv`；失败清单保存在 `logs/alpha_asset_failures_<project>_<来源哈希>.csv`。
+
+步骤4b如何跳过已完成块：
+
+1. 每轮先列出当前账号的 AlphaEarth 输出资产文件夹。
+2. 某块目标 Table Asset 存在时，立即标记为 `completed` 并跳过，不依赖旧日志。
+3. 目标资产不存在而任务为 `READY/RUNNING` 时继续等待；任务显示完成但资产不存在时会重新提交。
+4. 只对明确“空集合/无要素/无数据”的错误标记 `ignored_no_data` 且不重跑；例如 `Computed value is too large` 等其他错误写入失败清单，等待人工处理。
+
+人工重跑失败块的 PowerShell 示例：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml schedule-alpha-assets --resubmit-failed
+```
+
+也可只重跑指定空间块：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml schedule-alpha-assets --resubmit-chunks 102W_012N_xm98p00000_y15p00000_d1p00000
+```
+
+### 12. 双击 `run_04c_export_alpha_assets_to_drive.bat`
+
+步骤4c会再次询问步骤4b使用的 project 与 GEDI来源目录；请填入与4b相同的值。它只读取步骤4b已经实际存在的 Table Asset，每次最多提交30个 Google Drive 导出任务。完成后，CSV会出现在：
+
+```text
+mangrove_gedi_alphaearth_samples/
+```
+
+102W_012N测试瓦片共产生8个空间块，合计20,146个GEDI脚印；其他瓦片会根据点密度自动递归切分。
+
+按此前约869万条质量合格GEDI观测估算，步骤4b理论上至少需要约869个10,000点块，实际数量会因1°边界和空间密度增加。阶段1约201个表资产，在3个并行任务下预计数小时；步骤4b通常是数小时到1-2天，整体建议按1-3天安排，并以任务清单和 `staged_task_status_latest.csv` 的真实耗时为准。
+
+速度判断：阶段1已实测完整 6°瓦片 `102W_012N` 约4.1分钟、约0.92 EECU秒，已经很轻量；阶段2仍是总耗时和EECU的主体，因为它必须为每一个GEDI脚印读取64维10m embedding。小块实测2,475个脚印约12秒、约440 EECU秒。多账号可把阶段2分散到不同 project，增加可并行任务和可用额度；结果定义不变，也不会丢失月度观测。
+
+为什么步骤4b先导出到 GEE Asset：
+
+- 资产存在性可直接验证，避免只凭本地日志误判完成。
+- 可以跨账号读取阶段1 GEDI点表，并将步骤4b结果保存到当前账号。
+- 失败或中断后可以准确恢复，不重复计算已完成空间块。
 
 成功后会生成任务登记表：
 
 ```text
-logs/sample_tasks_YYYYMMDD_HHMMSS.csv
+logs/gedi_asset_tasks_YYYYMMDD_HHMMSS.csv
+logs/alpha_asset_jobs_<project>_<来源哈希>.csv
+logs/alpha_asset_failures_<project>_<来源哈希>.csv
+logs/alpha_asset_drive_tasks_YYYYMMDD_HHMMSS.csv
 ```
 
 请到 Google Drive 中的文件夹下载 CSV：
@@ -282,18 +428,20 @@ outputs/raw_samples/
 
 可以重复运行吗：
 
-- 可以。默认 `skip_existing_tasks: true`，已提交或已下载的 shard-year_window 会跳过。
-- 不要删除 `logs/sample_tasks_*.csv`，这些日志是断点续跑和防止重复提交的依据。
+- 可以。阶段1和步骤4b都会读取自己的任务日志并查询GEE状态。
+- 不要删除 `logs/gedi_asset_tasks_*.csv`、`logs/alpha_asset_jobs_*.csv` 和 `logs/alpha_asset_failures_*.csv`。
 
-默认每次最多提交 `20` 个新任务，避免一下子提交太多。  
-如果想改，在 `config.yaml` 里改：
+步骤4b默认首批与补批各提交 `30` 个任务，10分钟检查一次；如果想改，在 `config.yaml` 里改：
 
 ```yaml
 sampling:
-  max_new_tasks: 20
+  alpha_initial_batch: 30
+  alpha_refill_batch: 30
+  alpha_poll_minutes: 10
+  alpha_active_threshold: 10
 ```
 
-### 8. 双击 `run_05_aggregate.bat`
+### 13. 双击 `run_05_aggregate.bat`
 
 作用：
 
@@ -358,42 +506,72 @@ powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
 .\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml inspect-gee
 ```
 
-### 小样本切分 GMW
+### 新增或切换 GEE project 凭证
 
-只生成 5 个 shards，适合测试：
+下面命令只打印授权链接，不会自动打开浏览器。请把链接复制到指定的浏览器窗口：
 
 ```powershell
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml prepare-gmw --max-shards 5
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml auth-project --project ee-wyhao026
 ```
 
-### 全量切分 GMW
+临时使用该 project 读取另一个账号已共享的 GEDI 资产并启动步骤4b自动调度，不修改 `config.yaml`：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml --project ee-wyhao026 schedule-alpha-assets --source-asset-folder projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
+```
+
+### 生成原生瓦片索引
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml prepare-gmw --native-only
+```
+
+旧式流程需要全量 GeoJSON shards 时才运行：
 
 ```powershell
 .\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml prepare-gmw --all
 ```
 
-### 跑小样本采样
+### 验证新旧采样结果一致
 
 ```powershell
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --smoke
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml validate-native --year 2020 --month 3 --limit 5000
 ```
 
-### 提交一块正式 Drive 测试任务
+### 提交一块正式 GEDI 资产测试任务
 
 ```powershell
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --mode drive --max-shards 1 --years 2019-2025 --year-mode all
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml export-gedi-assets --tiles 102W_012N --years 2019-2025 --year-mode all
+```
+
+查看两阶段任务状态：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml check-staged-tasks
 ```
 
 ### 提交全量采样任务
 
 ```powershell
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --mode drive --years 2019-2025 --year-mode all
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml export-gedi-assets --years 2019-2025 --year-mode all
 ```
 
-如果某些大 shard 的全期任务失败，可以回退到按年拆分：
+阶段1资产完成后，启动步骤4b AlphaEarth资产自动调度：
 
 ```powershell
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml sample --mode drive --years 2019-2025 --year-mode annual
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml schedule-alpha-assets
+```
+
+步骤4b全部完成后，提交步骤4c，将已验证资产导出到Google Drive：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml export-alpha-assets-to-drive
+```
+
+如果某些密集瓦片的阶段1任务失败，可以指定瓦片并按年拆分；阶段2仍然按空间块拆分：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml export-gedi-assets --tiles 018W_006N --years 2019-2025 --year-mode annual
 ```
 
 ### 本地聚合
@@ -407,7 +585,7 @@ powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
 原始采样表字段：
 
 ```text
-shard_id          GMW shard 编号
+shard_id          推荐流程中为 GEDI 原生 6°瓦片编号；旧流程中为 GMW shard 编号
 gedi_image_id     GEDI 月度影像 ID
 year              GEDI 年份
 month             GEDI 月份
@@ -436,7 +614,7 @@ A00-A63           embedding 特征
 本项目要保留 2019-2025 年所有 GEDI 月度观测。  
 如果把 GEDI 先 mosaic，同一个位置多个月重复观测会被压成一个值，时间序列信息会丢失。
 
-因此代码按每张 GEDI 月度影像分别采样，然后合并表格。
+因此代码按每张 GEDI 月度影像分别提取质量合格脚印，合并全部月份后统一采样 AlphaEarth。月度观测没有合成或去重。
 
 注意：`--year-mode all` 只是把 2019-2025 全期结果放在同一个导出任务和同一个 CSV 里；内部仍然逐张 GEDI 月度影像采样，`year`、`month`、`gedi_image_id` 都会保留。
 
@@ -484,7 +662,18 @@ Caller does not have required permission to use project
 1. 修改 `config.yaml` 里的 `gee.project`。
 2. 或者让 project 管理员给你的 Google 账号授权。
 
-### 4. 全量采样为什么没有马上生成本地 CSV
+### 4. 步骤4b提示无法读取其他账号的 GEDI 资产
+
+确认来源路径是以 `.../gedi_points` 结尾的完整目录，并由资产所有者把文件夹或全部子表资产共享给当前 Google 账号。步骤4b会显示具体资产路径；检查共享权限后重新启动调度器即可。
+
+### 5. 步骤4b失败了怎么办
+
+打开最新的 `logs/alpha_asset_failures_<project>_<来源哈希>.csv`。其中会记录空间块、来源资产、目标资产与 GEE 原始报错。
+
+- `ignored_no_data` 表示明确没有数据，不需要重跑。
+- `needs_manual_retry` 表示计算、权限或导出异常；修正原因后用 `--resubmit-failed` 或 `--resubmit-chunks` 显式重跑。
+
+### 6. 为什么没有马上生成本地 CSV
 
 全量采样数据太大，默认是提交 Google Drive 导出任务。  
 请到 Google Drive 下载 CSV，再放到：
@@ -495,11 +684,11 @@ outputs/raw_samples/
 
 然后运行聚合。
 
-### 5. 可以中断后继续吗
+### 7. 可以中断后继续吗
 
 可以。  
-已经生成的 shard、日志、下载的表都不会自动删除。  
-重新运行时请查看 `logs/sample_tasks_*.csv`，避免重复提交同一个 shard/year。
+已经生成的索引、验证 shard、日志和下载表都不会自动删除。
+重新运行时步骤4b会先检查实际 AlphaEarth 输出资产；资产存在的块绝不会重复提交，READY/RUNNING任务会继续等待，其他失败则进入失败清单。
 
 ## GitHub 维护建议
 

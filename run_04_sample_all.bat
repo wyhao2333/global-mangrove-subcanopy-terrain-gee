@@ -8,7 +8,10 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 set PYTHONPATH=%~dp0src
-echo This submits Google Drive export tasks. Default max_new_tasks is controlled in config.yaml.
-".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml sample --mode drive --years 2019-2025 --year-mode all
+set PYTHONUTF8=1
+".venv\Scripts\python.exe" -m mangrove_terrain windows-guide stage1 --confirm
+if errorlevel 2 goto done
+".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml export-gedi-assets --years 2019-2025 --year-mode all
+:done
 echo.
 pause

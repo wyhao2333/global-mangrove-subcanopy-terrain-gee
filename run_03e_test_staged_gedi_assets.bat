@@ -9,9 +9,9 @@ if not exist ".venv\Scripts\python.exe" (
 )
 set PYTHONPATH=%~dp0src
 set PYTHONUTF8=1
-".venv\Scripts\python.exe" -m mangrove_terrain windows-guide native_test --confirm
+".venv\Scripts\python.exe" -m mangrove_terrain windows-guide stage1_test --confirm
 if errorlevel 2 goto done
-".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml sample-native --mode drive --tiles 102W_012N --years 2019-2025 --year-mode all
+".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml export-gedi-assets --tiles 102W_012N --years 2019-2025 --year-mode all
 :done
 echo.
 pause

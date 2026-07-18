@@ -40,6 +40,47 @@ def cell1_label(lon: float, lat: float) -> str:
     return f"{int(math.floor(lon))}_{int(math.floor(lat))}"
 
 
+def coverage_cells_for_bounds(
+    minx: float,
+    miny: float,
+    maxx: float,
+    maxy: float,
+) -> list[tuple[int, int]]:
+    """返回与面范围有面积相交的 1° 半开格网单元。
+
+    格网采用 [west, east) 和 [south, north) 约定。最大边界向内移动一个
+    浮点数，避免仅接触边界时错误地附加相邻格；这样用矢量 bounds 建索引
+    会略微多包含候选格，但不会因中心点落在别处而漏掉跨格的红树林区域。
+    """
+    west = math.floor(minx)
+    south = math.floor(miny)
+    east = math.floor(float(np.nextafter(maxx, -np.inf)))
+    north = math.floor(float(np.nextafter(maxy, -np.inf)))
+    return [(lon, lat) for lon in range(west, east + 1) for lat in range(south, north + 1)]
+
+
+def _coverage_grid_index(bounds_df: pd.DataFrame) -> pd.DataFrame:
+    """根据所有 GMW 要素的范围构建保守 1°/6°覆盖索引。"""
+    # 大多数要素只在一个 1° 格内；先保留中心格可避免为 100 多万要素创建 Python 循环。
+    rows = bounds_df[["fid", "cell_lon", "cell_lat"]].rename(
+        columns={"cell_lon": "grid_lon", "cell_lat": "grid_lat"}
+    )
+    spans = bounds_df[
+        (np.floor(bounds_df["minx"]) != np.floor(np.nextafter(bounds_df["maxx"], -np.inf)))
+        | (np.floor(bounds_df["miny"]) != np.floor(np.nextafter(bounds_df["maxy"], -np.inf)))
+    ]
+    extra_rows: list[dict[str, int]] = []
+    for item in spans.itertuples(index=False):
+        for grid_lon, grid_lat in coverage_cells_for_bounds(item.minx, item.miny, item.maxx, item.maxy):
+            extra_rows.append({"fid": int(item.fid), "grid_lon": grid_lon, "grid_lat": grid_lat})
+    if extra_rows:
+        rows = pd.concat([rows, pd.DataFrame(extra_rows)], ignore_index=True)
+    rows = rows.drop_duplicates(["fid", "grid_lon", "grid_lat"])
+    rows["cell1"] = [cell1_label(lon, lat) for lon, lat in zip(rows["grid_lon"], rows["grid_lat"])]
+    rows["tile6"] = [tile6_label(lon, lat) for lon, lat in zip(rows["grid_lon"], rows["grid_lat"])]
+    return rows
+
+
 def _feature_area_km2(geom) -> float:
     try:
         area_m2, _ = GEOD.geometry_area_perimeter(geom)
@@ -106,7 +147,12 @@ def _build_bounds_index(shp_path: Path) -> pd.DataFrame:
     return df
 
 
-def run(cfg: dict, all_shards: bool = False, max_shards: int | None = None) -> None:
+def run(
+    cfg: dict,
+    all_shards: bool = False,
+    max_shards: int | None = None,
+    native_only: bool = False,
+) -> None:
     shp_path = resolve_path(cfg, "gmw_shp")
     index_dir = resolve_path(cfg, "index_dir")
     shard_dir = resolve_path(cfg, "shard_dir")
@@ -122,7 +168,10 @@ def run(cfg: dict, all_shards: bool = False, max_shards: int | None = None) -> N
 
     max_bytes = int(float(cfg["gmw"]["max_geojson_mb"]) * 1_000_000)
     batch_size = int(cfg["gmw"].get("read_batch_features", 500))
-    if not all_shards and max_shards is None:
+    if native_only:
+        all_shards = False
+        max_shards = 1
+    elif not all_shards and max_shards is None:
         max_shards = 5
 
     console.rule("GMW 预处理")
@@ -131,22 +180,24 @@ def run(cfg: dict, all_shards: bool = False, max_shards: int | None = None) -> N
     bounds_df = _build_bounds_index(shp_path)
     bounds_df.to_csv(index_dir / "gmw_bounds_index.csv", index=False, encoding="utf-8-sig")
 
+    coverage_index = _coverage_grid_index(bounds_df)
     cell_stats = (
-        bounds_df.groupby(["cell1", "cell_lon", "cell_lat", "tile6"], as_index=False)
+        coverage_index.groupby(["cell1", "grid_lon", "grid_lat", "tile6"], as_index=False)
         .agg(feature_count=("fid", "size"))
-        .sort_values(["tile6", "cell_lon", "cell_lat"])
+        .sort_values(["tile6", "grid_lon", "grid_lat"])
     )
+    cell_stats = cell_stats.rename(columns={"grid_lon": "cell_lon", "grid_lat": "cell_lat"})
     cell_stats.to_csv(index_dir / "gmw_1deg_cells.csv", index=False, encoding="utf-8-sig")
 
     tile_stats = (
-        bounds_df.groupby("tile6", as_index=False)
+        coverage_index.groupby("tile6", as_index=False)
         .agg(feature_count=("fid", "size"))
         .sort_values("tile6")
     )
     tile_stats.to_csv(index_dir / "gmw_6deg_tiles.csv", index=False, encoding="utf-8-sig")
 
     console.print(f"GMW features: {len(bounds_df):,}")
-    console.print(f"1° cells: {len(cell_stats):,}; 6° tiles: {len(tile_stats):,}")
+    console.print(f"覆盖 1° cells: {len(cell_stats):,}; 覆盖 6° tiles: {len(tile_stats):,}")
 
     shard_rows: list[dict] = []
     shard_count = 0
@@ -217,5 +268,7 @@ def run(cfg: dict, all_shards: bool = False, max_shards: int | None = None) -> N
     shard_df.to_csv(index_dir / "aoi_shards.csv", index=False, encoding="utf-8-sig")
     console.print(f"[green]完成。生成 shards: {len(shard_df):,}[/green]")
     console.print(f"索引文件: {index_dir / 'aoi_shards.csv'}")
-    if not all_shards:
+    if native_only:
+        console.print("[green]原生瓦片索引已生成；额外保留 1 个旧 shard 用于结果一致性验证。[/green]")
+    elif not all_shards:
         console.print("[yellow]当前是小样本模式。如需全量切分，请运行 prepare-gmw --all。[/yellow]")

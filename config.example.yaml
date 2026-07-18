@@ -2,10 +2,15 @@ gee:
   # 可以改成自己的 GEE / Google Cloud project，例如 ee-wyhao026。
   project: ee-wyhao00203
   auth_mode: localhost
+  # 两阶段流程用于保存 GEDI 脚印表资产的根目录；{project} 会自动替换为上面的 project。
+  asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain
 
 datasets:
   gedi_collection: LARSE/GEDI/GEDI02_A_002_MONTHLY
   alphaearth_collection: GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL
+  # GMW v3 公共栅格与本项目的 GMW 2020 矢量来自同一版本，约 25 m。
+  gmw_raster_collection: projects/earthengine-legacy/assets/projects/sat-io/open-datasets/GMW/extent/GMW_V3
+  gmw_raster_image_index: gmw_v3_2020
   gedi_start_date: "2019-01-01"
   gedi_end_date: "2026-01-01"
   alphaearth_start_year: 2019
@@ -20,8 +25,8 @@ paths:
   log_dir: logs
 
 gmw:
-  # 单个 GeoJSON shard 太大会导致 GEE/代理断连。2.0 MB 已经过真实 GEE 全期导出测试。
-  # 如果个别区域失败，可降到 1.5 或 0.8 后重新切分 GMW。
+  # 以下大小只影响旧式 legacy_shards 回退流程；推荐 native_tiles 流程不依赖它。
+  # 单个 GeoJSON shard 太大会导致 GEE/代理断连，旧流程可从 2.0 降到 1.5 或 0.8。
   max_geojson_mb: 2.0
   read_batch_features: 500
 
@@ -33,8 +38,27 @@ sampling:
   local_row_limit: 5000
   max_new_tasks: 20
   skip_existing_tasks: true
-  # all = 一个 shard 导出 2019-2025 全部 GEDI 月度观测；annual = 按年拆分作为失败回退。
+  # 下面的 year_mode 只用于旧式直接联合采样；正式流程使用下方两阶段设置。
+  # all = 一个 shard/瓦片导出全部年份；annual = 按年拆分作为失败回退。
   year_mode: all
+  # 阶段1：一次保存全期GEDI脚印表资产，不重算AlphaEarth。
+  staged_point_year_mode: all
+  # 阶段2：从表资产按自适应空间块采样AlphaEarth。默认全期，但每块点数受限。
+  staged_alpha_year_mode: all
+  # 阶段2 GEDI 点表来源。留空表示当前 project 的 asset_root/gedi_points；
+  # 多账号时填入已共享给当前账号的完整目录，例如：
+  # projects/ee-wyhao00203/assets/global_mangrove_subcanopy_terrain/gedi_points
+  gedi_source_asset_folder: null
+  # 步骤4b自动调度：首次提交30块；每10分钟检查一次；READY+RUNNING不超过10块时补交30块。
+  alpha_initial_batch: 30
+  alpha_refill_batch: 30
+  alpha_poll_minutes: 10
+  alpha_active_threshold: 10
+  # 步骤4c把已经完成的AlphaEarth表资产导出到当前账号Google Drive的目录。
+  alpha_drive_folder: mangrove_gedi_alphaearth_samples
+  alpha_drive_max_new_tasks: 30
+  alpha_max_points_per_task: 10000
+  alpha_min_chunk_degrees: 0.0625
 
 aggregation:
   min_elev_count: 1
