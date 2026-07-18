@@ -6,6 +6,17 @@ import ee
 import pandas as pd
 
 
+CHUNK_COLUMNS = [
+    "chunk_id",
+    "west",
+    "south",
+    "east",
+    "north",
+    "size_degrees",
+    "point_count",
+]
+
+
 def filter_points_to_bounds(
     points: ee.FeatureCollection,
     west: float,
@@ -78,7 +89,11 @@ def plan_spatial_chunks(
                 ]
             )
         queue = next_queue
-    return pd.DataFrame(finished).sort_values(["south", "west", "size_degrees"]).reset_index(drop=True)
+    if not finished:
+        return pd.DataFrame(columns=CHUNK_COLUMNS)
+    return pd.DataFrame(finished, columns=CHUNK_COLUMNS).sort_values(
+        ["south", "west", "size_degrees"]
+    ).reset_index(drop=True)
 
 
 def load_or_plan_chunks(

@@ -366,6 +366,8 @@ sampling:
 
 如果共享权限不足，程序会显示无法读取的资产路径，不会提交错误任务，并写入 `logs/alpha_asset_source_issues_<project>_<来源哈希>.csv`。任务清单保存在 `logs/alpha_asset_jobs_<project>_<来源哈希>.csv`；失败清单保存在 `logs/alpha_asset_failures_<project>_<来源哈希>.csv`。
 
+来源目录可以列出并不代表当前认证账号能实际加载其中的表资产。04b 会在每个瓦片开始前以当前凭证再次验证该表是可读取的 `TABLE`；缺失、无读取权限、空表，或本瓦片没有可采样 GEDI 点时，会写入上述来源问题清单并继续处理其余瓦片，不会中断整个批次。共享其他账号资产时，应在来源账号中将 `gedi_points` 文件夹及其全部子表共享给当前认证所用的 Google 账号邮箱；`project ID` 不是可授予读取权限的账号身份。
+
 步骤4b如何跳过已完成块：
 
 1. 每轮先列出当前账号的 AlphaEarth 输出资产文件夹。

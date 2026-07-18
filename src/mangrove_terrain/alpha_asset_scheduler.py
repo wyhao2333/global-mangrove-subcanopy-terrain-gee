@@ -52,6 +52,7 @@ JOB_COLUMNS = [
     "attempt_count",
     "updated_at",
 ]
+SOURCE_ISSUE_COLUMNS = ["time", "status", "tile_id", "source_asset_id", "error"]
 
 
 def _now() -> str:
@@ -135,11 +136,20 @@ def _job_key(source_asset_id: str, chunk_id: str, year_start: int, year_end: int
     return f"{source_asset_id}|{year_start}|{year_end}|{chunk_id}"
 
 
-def _source_asset_is_readable(assets: dict[str, dict] | None, asset_id: str) -> tuple[bool, str | None]:
-    if assets is not None and asset_id in assets:
-        return True, None
-    _, error = readable_asset(asset_id)
-    return error is None, error
+def _source_asset_is_readable(asset_id: str) -> tuple[bool, str | None]:
+    """确认来源是当前凭证可读取的 GEE Table Asset。
+
+    ``listAssets`` 只能说明目录列表里出现过一个名称，不能保证当前凭证
+    可以真正加载该表。跨账号共享和未导出的空瓦片都必须以 ``getAsset``
+    的实际读取结果为准。
+    """
+    asset, error = readable_asset(asset_id)
+    if error:
+        return False, error
+    asset_type = str((asset or {}).get("type", ""))
+    if asset_type != "TABLE":
+        return False, f"来源资产类型不是 TABLE，而是 {asset_type or '未知类型'}。"
+    return True, None
 
 
 def plan_jobs(
@@ -169,32 +179,52 @@ def plan_jobs(
     max_points = int(cfg["sampling"].get("alpha_max_points_per_task", 10000))
     min_degrees = float(cfg["sampling"].get("alpha_min_chunk_degrees", 0.0625))
 
-    try:
-        source_assets: dict[str, dict] | None = list_child_assets(source_folder)
-    except Exception:
-        # 文件夹未共享但单个表资产被共享时，逐表 getAsset 仍然能正常工作。
-        source_assets = None
-
     jobs: list[dict] = []
     source_issues: list[dict] = []
     for tile in tiles.itertuples(index=False):
         tile_id = str(tile.tile6)
         source_asset_id = f"{source_folder}/gedi_points_{tile_id}_{source_start}_{source_end}"
-        readable, error = _source_asset_is_readable(source_assets, source_asset_id)
+        readable, error = _source_asset_is_readable(source_asset_id)
         if not readable:
             source_issues.append(
                 {
                     "time": _now(),
+                    "status": "source_asset_unavailable",
                     "tile_id": tile_id,
                     "source_asset_id": source_asset_id,
                     "error": error or "无法读取来源GEDI资产",
                 }
             )
             continue
-        points = ee.FeatureCollection(source_asset_id)
         cells = cell_index[cell_index["tile6"] == tile_id]
         plan_path = planned_dir / f"{tile_id}_{source_start}_{source_end}_max{max_points}.csv"
-        chunks = load_or_plan_chunks(plan_path, points, tile_id, cells, max_points, min_degrees)
+        try:
+            points = ee.FeatureCollection(source_asset_id)
+            chunks = load_or_plan_chunks(plan_path, points, tile_id, cells, max_points, min_degrees)
+        except Exception as exc:
+            # 单个表在引用/规划时失效、权限被撤回或服务端临时拒绝时，不能中断全部调度。
+            source_issues.append(
+                {
+                    "time": _now(),
+                    "status": "source_planning_failed",
+                    "tile_id": tile_id,
+                    "source_asset_id": source_asset_id,
+                    "error": str(exc),
+                }
+            )
+            continue
+        if chunks.empty:
+            # 未导出的空瓦片通常不会有来源资产；若存在空 TABLE，也同样跳过。
+            source_issues.append(
+                {
+                    "time": _now(),
+                    "status": "source_empty_or_outside_gmw",
+                    "tile_id": tile_id,
+                    "source_asset_id": source_asset_id,
+                    "error": "来源表在本瓦片的 GMW 1 度格网内没有可采样的 GEDI 脚印。",
+                }
+            )
+            continue
         for chunk in chunks.itertuples(index=False):
             target_asset_id = _asset_id_for_chunk(
                 target_folder,
@@ -471,7 +501,9 @@ def run(
             max_jobs=max_jobs,
         )
         jobs = merge_new_jobs(jobs, planned)
-        pd.DataFrame(source_issues).to_csv(source_issue_path, index=False, encoding="utf-8-sig")
+        pd.DataFrame(source_issues, columns=SOURCE_ISSUE_COLUMNS).to_csv(
+            source_issue_path, index=False, encoding="utf-8-sig"
+        )
         if jobs.empty:
             _save_jobs(jobs, manifest_path)
             console.print("[yellow]没有可调度的空间块。请检查来源GEDI资产是否完成并已共享。[/yellow]")
