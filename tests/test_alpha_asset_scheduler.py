@@ -8,11 +8,14 @@ import pandas as pd
 from mangrove_terrain.alpha_asset_scheduler import (
     JOB_COLUMNS,
     _select_submit_candidates,
+    _source_asset_is_readable,
     classify_failure,
+    plan_jobs,
     refresh_job_states,
     scheduled_batch_size,
     scheduler_lock,
 )
+from mangrove_terrain.spatial_chunks import CHUNK_COLUMNS, plan_spatial_chunks
 
 
 def make_jobs(status: str = "ready", task_id: str = "task-1") -> pd.DataFrame:
@@ -81,6 +84,62 @@ class AlphaAssetSchedulerTests(unittest.TestCase):
                     with scheduler_lock(lock_path):
                         pass
             self.assertFalse(lock_path.exists())
+
+    def test_source_table_is_checked_directly_instead_of_trusting_folder_listing(self):
+        asset_id = "projects/source/assets/gedi_points/gedi_points_000E_000N_2019_2025"
+        with patch(
+            "mangrove_terrain.alpha_asset_scheduler.readable_asset",
+            return_value=(None, "Asset not found."),
+        ):
+            readable, error = _source_asset_is_readable(asset_id)
+        self.assertFalse(readable)
+        self.assertIn("not found", error)
+
+    def test_non_table_source_asset_is_rejected(self):
+        with patch(
+            "mangrove_terrain.alpha_asset_scheduler.readable_asset",
+            return_value=({"type": "FOLDER"}, None),
+        ):
+            readable, error = _source_asset_is_readable("projects/source/assets/folder")
+        self.assertFalse(readable)
+        self.assertIn("TABLE", error)
+
+    def test_empty_spatial_plan_has_stable_columns(self):
+        cells = pd.DataFrame(columns=["tile6", "cell_lon", "cell_lat"])
+        chunks = plan_spatial_chunks(None, "000E_000N", cells, 10_000, 0.0625)
+        self.assertTrue(chunks.empty)
+        self.assertEqual(list(chunks.columns), CHUNK_COLUMNS)
+
+    def test_planning_failure_for_one_source_does_not_abort_other_tiles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pd.DataFrame(
+                [
+                    {"tile6": "000E_000N", "cell_lon": 0.0, "cell_lat": 0.0},
+                    {"tile6": "006E_000N", "cell_lon": 6.0, "cell_lat": 0.0},
+                ]
+            ).to_csv(root / "gmw_1deg_cells.csv", index=False)
+            tiles = pd.DataFrame({"tile6": ["000E_000N", "006E_000N"]})
+            cfg = {
+                "gee": {"project": "ee-target"},
+                "datasets": {"alphaearth_start_year": 2019, "alphaearth_end_year": 2025},
+                "paths": {"index_dir": str(root)},
+                "sampling": {"alpha_max_points_per_task": 10_000, "alpha_min_chunk_degrees": 0.0625},
+            }
+            with patch("mangrove_terrain.alpha_asset_scheduler._select_tiles", return_value=tiles):
+                with patch("mangrove_terrain.alpha_asset_scheduler._windows", return_value=[(2019, 2025)]):
+                    with patch(
+                        "mangrove_terrain.alpha_asset_scheduler._source_asset_is_readable",
+                        side_effect=[(True, None), (False, "Asset not found.")],
+                    ):
+                        with patch("mangrove_terrain.alpha_asset_scheduler.ee.FeatureCollection", return_value=object()):
+                            with patch(
+                                "mangrove_terrain.alpha_asset_scheduler.load_or_plan_chunks",
+                                side_effect=RuntimeError("Collection.loadTable: not found."),
+                            ):
+                                jobs, issues = plan_jobs(cfg, "projects/source/assets/gedi_points")
+            self.assertTrue(jobs.empty)
+            self.assertEqual([item["status"] for item in issues], ["source_planning_failed", "source_asset_unavailable"])
 
 
 if __name__ == "__main__":
