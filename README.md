@@ -368,6 +368,26 @@ sampling:
 
 来源目录可以列出并不代表当前认证账号能实际加载其中的表资产。04b 会在每个瓦片开始前以当前凭证再次验证该表是可读取的 `TABLE`；缺失、无读取权限、空表，或本瓦片没有可采样 GEDI 点时，会写入上述来源问题清单并继续处理其余瓦片，不会中断整个批次。共享其他账号资产时，应在来源账号中将 `gedi_points` 文件夹及其全部子表共享给当前认证所用的 Google 账号邮箱；`project ID` 不是可授予读取权限的账号身份。
 
+### 批量共享来源 GEDI 表资产
+
+GEE Code Editor 的文件夹共享窗口没有递归共享已有子表的开关。若阶段 1 的 `gedi_points` 有很多 `TABLE` 资产，双击 `run_00c_grant_gedi_source_access.bat` 可一次完成授权。
+
+这一步必须在本机临时以**来源资产拥有者**的 Google 账号认证。若还没有该账号的凭证，程序会打印一个授权链接；请把链接粘贴到已登录来源账号的浏览器中完成认证。凭证只保存在本机：`%USERPROFILE%\.config\earthengine\projects\<来源project>.json`，不会上传 GitHub。
+
+程序依次要求输入：来源拥有者使用的 GEE project、来源 `gedi_points` 完整目录、授权方式，以及接收权限的 Google 邮箱。选择“所有人可读”会公开该目录和全部直接 `TABLE` 子资产；选择邮箱则仅授予该邮箱 Reader。程序会先输出 `logs/source_asset_access_<来源哈希>.csv` 授权清单，随后必须输入大写 `GRANT` 才会真正修改权限。
+
+命令行方式如下。默认只预览，不会修改 ACL：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml grant-source-asset-access --owner-project my-project-2025924 --source-asset-folder projects/my-project-2025924/assets/global_mangrove_subcanopy_terrain/gedi_points --recipient target-account@example.com
+```
+
+确认清单无误后，增加 `--apply --yes` 执行批量授权：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml grant-source-asset-access --owner-project my-project-2025924 --source-asset-folder projects/my-project-2025924/assets/global_mangrove_subcanopy_terrain/gedi_points --recipient target-account@example.com --apply --yes
+```
+
 步骤4b如何跳过已完成块：
 
 1. 每轮先列出当前账号的 AlphaEarth 输出资产文件夹。

@@ -7,6 +7,12 @@ from unittest.mock import patch
 import pandas as pd
 
 from mangrove_terrain import ee_auth
+from mangrove_terrain.asset_access import (
+    _has_read_access,
+    _reader_principal,
+    run as grant_source_asset_access,
+    updated_reader_acl,
+)
 from mangrove_terrain.asset_utils import source_point_asset_folder
 from mangrove_terrain.export_staged import _submitted_windows
 
@@ -31,6 +37,37 @@ class ProjectCredentialTests(unittest.TestCase):
 
 
 class SharedAssetTests(unittest.TestCase):
+    def test_reader_acl_adds_user_without_removing_existing_permissions(self):
+        acl = {
+            "owners": ["user:owner@example.com"],
+            "writers": ["user:writer@example.com"],
+            "readers": ["user:reader@example.com"],
+            "all_users_can_read": False,
+        }
+        updated = updated_reader_acl(acl, "target@example.com", anyone=False)
+        self.assertIn("user:target@example.com", updated["readers"])
+        self.assertEqual(updated["owners"], acl["owners"])
+        self.assertEqual(updated["writers"], acl["writers"])
+        self.assertTrue(_has_read_access(updated, "target@example.com", anyone=False))
+        self.assertEqual(_reader_principal("target@example.com"), "user:target@example.com")
+
+    def test_public_acl_preserves_existing_readers(self):
+        acl = {"readers": ["user:reader@example.com"], "writers": []}
+        updated = updated_reader_acl(acl, None, anyone=True)
+        self.assertTrue(updated["all_users_can_read"])
+        self.assertEqual(updated["readers"], acl["readers"])
+
+    def test_noninteractive_grant_requires_double_confirmation_before_authentication(self):
+        cfg = {"gee": {"project": "ee-owner", "auth_mode": "localhost"}, "paths": {"log_dir": "logs"}}
+        with self.assertRaisesRegex(ValueError, "--apply --yes"):
+            grant_source_asset_access(
+                cfg,
+                source_asset_folder="projects/ee-owner/assets/gedi_points",
+                recipient="target@example.com",
+                apply=True,
+                yes=False,
+            )
+
     def test_external_source_folder_overrides_current_project_folder(self):
         cfg = {
             "gee": {"project": "ee-target"},
