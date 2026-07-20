@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -40,14 +41,17 @@ def run(cfg: dict, input_dir: str | Path | None = None, output_path: str | Path 
     console.print(f"输入文件数: {len(files)}")
 
     frames = []
+    input_rows = 0
     for path in files:
         df = _read_table(path)
+        input_rows += len(df)
         if len(df) == 0:
             continue
         frames.append(df)
     if not frames:
         raise RuntimeError("输入表为空，无法聚合。")
     data = pd.concat(frames, ignore_index=True)
+    rows_before_required_filter = len(data)
 
     required = {"ae_x", "ae_y", "elev_lowestmode", "lon", "lat"}
     missing = required - set(data.columns)
@@ -57,6 +61,7 @@ def run(cfg: dict, input_dir: str | Path | None = None, output_path: str | Path 
     for col in ["ae_x", "ae_y", "elev_lowestmode", "lon", "lat", *ALPHA_BANDS]:
         if col in data.columns:
             data[col] = pd.to_numeric(data[col], errors="coerce")
+    alpha_missing_rows = int(data[[band for band in ALPHA_BANDS if band in data.columns]].isna().any(axis=1).sum())
     data = data.dropna(subset=["ae_x", "ae_y", "elev_lowestmode"])
 
     band_cols = [b for b in ALPHA_BANDS if b in data.columns]
@@ -85,6 +90,28 @@ def run(cfg: dict, input_dir: str | Path | None = None, output_path: str | Path 
     preview_rows = int(cfg.get("aggregation", {}).get("preview_csv_rows", 10000))
     preview = out.with_suffix(".preview.csv")
     result.head(preview_rows).to_csv(preview, index=False, encoding="utf-8-sig")
+    quantiles = result["elev_median"].quantile([0, 0.001, 0.01, 0.05, 0.5, 0.95, 0.99, 0.999, 1])
+    summary = {
+        "input_file_count": len(files),
+        "input_rows": int(input_rows),
+        "rows_before_required_filter": int(rows_before_required_filter),
+        "rows_after_required_filter": int(len(data)),
+        "unique_10m_pixels": int(len(result)),
+        "mean_gedi_observations_per_pixel": float(result["elev_count"].mean()),
+        "median_gedi_observations_per_pixel": float(result["elev_count"].median()),
+        "raw_rows_with_any_missing_alpha_band": alpha_missing_rows,
+        "elev_median_quantiles": {str(key): float(value) for key, value in quantiles.items()},
+    }
+    summary_path = out.with_name(f"{out.stem}_summary.json")
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     console.print(f"[green]聚合完成。记录数: {len(result):,}[/green]")
+    console.print(
+        "原始行数: {input_rows:,}；唯一10m像元: {pixels:,}；平均每像元GEDI观测: {mean:.2f}".format(
+            input_rows=input_rows,
+            pixels=len(result),
+            mean=float(result["elev_count"].mean()),
+        )
+    )
     console.print(f"训练表: {out}")
     console.print(f"预览 CSV: {preview}")
+    console.print(f"统计报告: {summary_path}")

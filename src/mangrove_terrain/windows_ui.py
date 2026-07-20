@@ -15,7 +15,12 @@ GUIDES = {
     "stage2_test": ("步骤4b小样本测试", "仅提交一个 AlphaEarth 空间块，用于检查资产导出是否正常。"),
     "stage2_status": ("检查两阶段任务状态", "将显示已提交任务的完成、运行和失败状态。"),
     "stage2_drive": ("步骤4c：导出表资产到 Google Drive", "仅导出已验证存在的 AlphaEarth 表资产，供后续下载和本地聚合。"),
+    "stage2_local_download": ("步骤4c：直接下载 AlphaEarth 表资产", "读取步骤4b已经完成的 AlphaEarth 输出目录，直接下载 CSV 到 outputs/raw_samples，不会创建 Drive 或 GEE 导出任务。"),
     "aggregate": ("步骤5：本地中值聚合", "将读取 outputs/raw_samples 中下载的CSV或Parquet，并生成训练表。"),
+    "r_check": ("步骤6a：检查 R/ranger 环境", "未找到 R 时会提示从 CRAN 下载，并允许确认或修改安装目录。"),
+    "training_prepare": ("步骤6b：准备训练样本", "生成固定70/30划分、R 调参样本池和供 Earth Engine 网页上传的完整 CSV。"),
+    "ranger_tuning": ("步骤6c：R/ranger 调参", "将运行 240 组随机森林参数和重复 OOB 评估，运行时间较长；可按 Ctrl+C 停止。"),
+    "gee_models": ("步骤6d：提交 GEE 模型", "先确认训练 CSV 已在 Earth Engine 网页上传为 TABLE Asset；将提交70%和全部样本两个回归模型任务。"),
 }
 
 

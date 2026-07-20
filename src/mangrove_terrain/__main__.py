@@ -9,6 +9,7 @@ from . import (
     asset_access,
     check_native_tasks,
     check_staged_tasks,
+    download_alpha_assets,
     ee_auth,
     export_alpha_assets_to_drive,
     export_native_tiles,
@@ -16,7 +17,11 @@ from . import (
     export_staged,
     inspect_gee,
     modeling_placeholder,
+    prepare_training_samples,
     prepare_gmw,
+    r_environment,
+    ranger_tuning,
+    submit_gee_models,
     validate_native,
     windows_ui,
 )
@@ -123,12 +128,33 @@ def main() -> None:
     p_drive.add_argument("--max-new-tasks", type=int, default=None)
     p_drive.add_argument("--force-assets", nargs="*", default=None, help="仅导出指定的阶段2表资产")
 
+    p_local_download = sub.add_parser("download-alpha-assets", help="步骤4c：直接下载 AlphaEarth 表资产到本地")
+    p_local_download.add_argument("--asset-folder", default=None, help="步骤4b AlphaEarth 输出目录完整路径")
+    p_local_download.add_argument("--interactive", action="store_true", help="以中文提示输入 project、输出目录和数量检查选项")
+    count_group = p_local_download.add_mutually_exclusive_group()
+    count_group.add_argument("--check-asset-count", dest="check_asset_count", action="store_true")
+    count_group.add_argument("--skip-asset-count-check", dest="check_asset_count", action="store_false")
+    p_local_download.set_defaults(check_asset_count=None)
+    p_local_download.add_argument("--workers", type=int, default=None, help="本地下载并发数")
+
     sub.add_parser("check-native-tasks", help="检查原生瓦片 Drive 导出任务状态")
     sub.add_parser("check-staged-tasks", help="检查两阶段 GEDI 资产和 AlphaEarth 导出任务状态")
 
     p_agg = sub.add_parser("aggregate", help="本地按 AlphaEarth 10 m 像元聚合 GEDI 高程")
     p_agg.add_argument("--input-dir", default=None, help="原始 CSV/Parquet 所在目录")
     p_agg.add_argument("--output", default=None, help="输出 parquet 路径")
+
+    p_r_check = sub.add_parser("check-r-environment", help="步骤6a：检查或安装 R/ranger 环境")
+    p_r_check.add_argument("--interactive", action="store_true", help="找不到 R 时按中文提示下载安装")
+    p_prepare_training = sub.add_parser("prepare-training-samples", help="步骤6b：生成固定训练划分和 GEE 上传 CSV")
+    p_prepare_training.add_argument("--input", default=None, help="聚合训练 Parquet 路径")
+    p_prepare_training.add_argument("--output-csv", default=None, help="GEE 网页上传 CSV 输出路径")
+    p_tune = sub.add_parser("tune-ranger", help="步骤6c：R/ranger 重复 OOB 调参")
+    p_tune.add_argument("--quick", action="store_true", help="只运行前5组参数，供环境验证使用")
+    p_models = sub.add_parser("submit-gee-models", help="步骤6d：提交 GEE 70%% 与全样本回归模型")
+    p_models.add_argument("--training-asset", default=None, help="Earth Engine 网页上传后的训练 TABLE Asset 路径")
+    p_models.add_argument("--version", default=None, help="模型版本号，例如 v001")
+    p_models.add_argument("--interactive", action="store_true", help="以中文提示输入训练 TABLE Asset 路径")
 
     sub.add_parser("model-placeholder", help="显示建模占位说明")
 
@@ -249,8 +275,29 @@ def main() -> None:
                 force_assets=args.force_assets,
                 interactive=args.interactive,
             )
+        elif args.command == "download-alpha-assets":
+            download_alpha_assets.run(
+                cfg,
+                asset_folder=args.asset_folder,
+                interactive=args.interactive,
+                check_asset_count=args.check_asset_count,
+                workers=args.workers,
+            )
         elif args.command == "aggregate":
             aggregate_samples.run(cfg, input_dir=args.input_dir, output_path=args.output)
+        elif args.command == "check-r-environment":
+            r_environment.run(cfg, config_path=args.config, interactive=args.interactive)
+        elif args.command == "prepare-training-samples":
+            prepare_training_samples.run(cfg, input_path=args.input, output_csv=args.output_csv)
+        elif args.command == "tune-ranger":
+            ranger_tuning.run(cfg, quick=args.quick)
+        elif args.command == "submit-gee-models":
+            submit_gee_models.run(
+                cfg,
+                training_asset=args.training_asset,
+                version=args.version,
+                interactive=args.interactive,
+            )
         elif args.command == "model-placeholder":
             modeling_placeholder.run()
     except Exception as exc:
