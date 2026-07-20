@@ -56,9 +56,26 @@ sampling:
   # 步骤4c把已经完成的AlphaEarth表资产导出到当前账号Google Drive的目录。
   alpha_drive_folder: mangrove_gedi_alphaearth_samples
   alpha_drive_max_new_tasks: 30
+  # 新版步骤4c：直接把 AlphaEarth 表资产下载到 outputs/raw_samples。
+  alpha_download_workers: 3
+  alpha_download_retry_count: 3
+  alpha_download_timeout_seconds: 900
+  alpha_download_check_asset_count: true
   alpha_max_points_per_task: 10000
   alpha_min_chunk_degrees: 0.0625
 
 aggregation:
   min_elev_count: 1
   preview_csv_rows: 10000
+
+modeling:
+  # 步骤6a检测或安装后自动写入实际 Rscript.exe 路径。
+  rscript_path: ""
+  # 将步骤6b生成的CSV手工上传为 Earth Engine TABLE Asset 后填入这里。
+  gee_training_asset: ""
+  model_version: v001
+  split_seed: 42
+  train_fraction: 0.70
+  tuning_repeats: 5
+  tuning_subsample_fraction: 0.10
+  tuning_max_rows_per_repeat: 200000
