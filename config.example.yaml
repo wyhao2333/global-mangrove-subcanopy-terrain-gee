@@ -79,3 +79,31 @@ modeling:
   tuning_repeats: 5
   tuning_subsample_fraction: 0.10
   tuning_max_rows_per_repeat: 200000
+
+# 推荐的 MEOW-14 分区建模流程。区域 Shapefile 不随公开仓库提交，
+# 请从本项目“区域划分结果”文件夹复制到下列默认位置，或改为自己的绝对路径。
+regional_modeling:
+  region_shp: 区域划分结果/coastal_belt_irregular_mangrove_regions_shapefile/coastal_belt_irregular_mangrove_regions.shp
+  region_code_field: REG_CODE
+  region_name_field: REGION
+  # 正式输入是步骤 5 的完整 Parquet；如实际文件在 outputs/training，请修改此项。
+  input_training_parquet: data/mangrove_gedi_alphaearth_training.parquet
+  output_dir: outputs/training/meow14
+  split_seed: 42
+  train_fraction: 0.70
+  # 每区：5 次独立 10% 无放回子样本，固定 24 组受 GEE 支持的参数。
+  tuning_repeats: 5
+  tuning_subsample_fraction: 0.10
+  tuning_grid_trees: [100, 200, 300]
+  tuning_grid_mtry: [8, 16]
+  tuning_grid_bag_fraction: [0.5, 0.632]
+  tuning_grid_min_node_size: [5, 10]
+  assignment_grid_degrees: 0.1
+  prediction_batch_rows: 100000
+  save_local_models: false
+  model_version: v001
+  # 上传后的 14 个 TABLE Assets 应命名为 AFW_train70、AFE_train70 ... AME_train70。
+  gee_training_asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain/training/meow14_{model_version}
+  gee_model_asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain/models/meow14_{model_version}
+  gee_max_concurrent_tasks: 3
+  gee_poll_minutes: 10

@@ -9,9 +9,9 @@ if not exist ".venv\Scripts\python.exe" (
 )
 set PYTHONPATH=%~dp0src
 set PYTHONUTF8=1
-".venv\Scripts\python.exe" -m mangrove_terrain windows-guide aggregate --confirm
+".venv\Scripts\python.exe" -m mangrove_terrain windows-guide regional_gee_check --confirm
 if errorlevel 2 goto done
-".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml aggregate
+".venv\Scripts\python.exe" -m mangrove_terrain --config config.yaml check-regional-gee-assets
 :done
 echo.
 pause
