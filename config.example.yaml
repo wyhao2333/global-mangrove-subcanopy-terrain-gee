@@ -68,18 +68,6 @@ aggregation:
   min_elev_count: 1
   preview_csv_rows: 10000
 
-modeling:
-  # 步骤6a检测或安装后自动写入实际 Rscript.exe 路径。
-  rscript_path: ""
-  # 将步骤6b生成的CSV手工上传为 Earth Engine TABLE Asset 后填入这里。
-  gee_training_asset: ""
-  model_version: v001
-  split_seed: 42
-  train_fraction: 0.70
-  tuning_repeats: 5
-  tuning_subsample_fraction: 0.10
-  tuning_max_rows_per_repeat: 200000
-
 # 推荐的 MEOW-14 分区建模流程。区域 Shapefile 不随公开仓库提交，
 # 请从本项目“区域划分结果”文件夹复制到下列默认位置，或改为自己的绝对路径。
 regional_modeling:
@@ -89,6 +77,8 @@ regional_modeling:
   # 正式输入是步骤 5 的完整 Parquet；如实际文件在 outputs/training，请修改此项。
   input_training_parquet: data/mangrove_gedi_alphaearth_training.parquet
   output_dir: outputs/training/meow14
+  # 步骤6a检测或安装后自动写入实际 Rscript.exe 路径。
+  rscript_path: ""
   split_seed: 42
   train_fraction: 0.70
   # 每区：5 次独立 10% 无放回子样本，固定 24 组受 GEE 支持的参数。

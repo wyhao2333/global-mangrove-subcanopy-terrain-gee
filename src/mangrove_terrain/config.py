@@ -59,16 +59,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "alpha_min_chunk_degrees": 0.0625,
     },
     "aggregation": {"min_elev_count": 1, "preview_csv_rows": 10000},
-    "modeling": {
-        "rscript_path": "",
-        "gee_training_asset": "",
-        "model_version": "v001",
-        "split_seed": 42,
-        "train_fraction": 0.70,
-        "tuning_repeats": 5,
-        "tuning_subsample_fraction": 0.10,
-        "tuning_max_rows_per_repeat": 200000,
-    },
     "regional_modeling": {
         # 14 个项目建模区由 MEOW 232 个原始生态区归并而来；原始矢量不随代码仓库提交。
         "region_shp": "区域划分结果/coastal_belt_irregular_mangrove_regions_shapefile/coastal_belt_irregular_mangrove_regions.shp",
@@ -76,6 +66,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "region_name_field": "REGION",
         "input_training_parquet": "data/mangrove_gedi_alphaearth_training.parquet",
         "output_dir": "outputs/training/meow14",
+        "rscript_path": "",
         "split_seed": 42,
         "train_fraction": 0.70,
         "tuning_repeats": 5,
@@ -120,7 +111,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
 
 
 def sync_config(config_path: str | Path | None = None) -> Path:
-    """把新增默认字段写入已有配置，但不覆盖用户已经设置的值。"""
+    """同步新配置，并将已废弃的全局建模 R 路径迁移到区域流程。"""
     root = project_root()
     path = Path(config_path) if config_path else root / "config.yaml"
     if not path.is_absolute():
@@ -129,6 +120,12 @@ def sync_config(config_path: str | Path | None = None) -> Path:
     if path.exists():
         with path.open("r", encoding="utf-8") as f:
             existing = yaml.safe_load(f) or {}
+    legacy_modeling = existing.pop("modeling", None)
+    if isinstance(legacy_modeling, dict):
+        legacy_rscript = str(legacy_modeling.get("rscript_path", "")).strip()
+        regional = existing.setdefault("regional_modeling", {})
+        if legacy_rscript and not str(regional.get("rscript_path", "")).strip():
+            regional["rscript_path"] = legacy_rscript
     merged = deepcopy(DEFAULT_CONFIG)
     _deep_update(merged, existing)
     path.parent.mkdir(parents=True, exist_ok=True)

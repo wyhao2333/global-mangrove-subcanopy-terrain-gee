@@ -6,8 +6,10 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 import shapely
+import yaml
 from shapely.strtree import STRtree
 
+from mangrove_terrain.config import sync_config
 from mangrove_terrain.gee_workflow import ALPHA_BANDS
 from mangrove_terrain.regional_gee_models import _classifier, _refresh_jobs
 from mangrove_terrain.regional_training import RegionIndex, add_stable_sample_fields, assign_region_codes, run
@@ -25,6 +27,15 @@ def make_region_index(count: int = 14) -> RegionIndex:
 
 
 class RegionalTrainingTests(unittest.TestCase):
+    def test_sync_config_migrates_old_global_rscript_to_regional_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.yaml"
+            path.write_text("modeling:\n  rscript_path: D:/R/Rscript.exe\n", encoding="utf-8")
+            sync_config(path)
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+            self.assertNotIn("modeling", loaded)
+            self.assertEqual(loaded["regional_modeling"]["rscript_path"], "D:/R/Rscript.exe")
+
     def test_assignment_reports_unassigned_and_overlapping_points(self):
         polygons = np.asarray([shapely.box(0, 0, 2, 2), shapely.box(1, 0, 3, 2)])
         index = RegionIndex(
