@@ -19,7 +19,7 @@ CRAN_WINDOWS_BASE = "https://cran.r-project.org/bin/windows/base/"
 
 
 def _candidate_rscripts(cfg: dict) -> list[Path]:
-    configured = str(cfg.get("modeling", {}).get("rscript_path", "")).strip()
+    configured = str(cfg.get("regional_modeling", {}).get("rscript_path", "")).strip()
     candidates = [Path(configured)] if configured else []
     on_path = shutil.which("Rscript.exe") or shutil.which("Rscript")
     if on_path:
@@ -104,7 +104,7 @@ def _save_rscript_path(config_path: str | Path, rscript: Path) -> None:
     if path.exists():
         with path.open("r", encoding="utf-8") as file_obj:
             current = yaml.safe_load(file_obj) or {}
-    current.setdefault("modeling", {})["rscript_path"] = str(rscript).replace("\\", "/")
+    current.setdefault("regional_modeling", {})["rscript_path"] = str(rscript).replace("\\", "/")
     with path.open("w", encoding="utf-8", newline="\n") as file_obj:
         yaml.safe_dump(current, file_obj, allow_unicode=True, sort_keys=False)
 

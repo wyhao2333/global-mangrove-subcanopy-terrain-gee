@@ -16,15 +16,11 @@ from . import (
     export_samples,
     export_staged,
     inspect_gee,
-    modeling_placeholder,
-    prepare_training_samples,
     prepare_gmw,
     regional_gee_models,
     regional_ranger,
     regional_training,
     r_environment,
-    ranger_tuning,
-    submit_gee_models,
     validate_native,
     windows_ui,
 )
@@ -41,14 +37,14 @@ def _years(value: str) -> list[int]:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mangrove_terrain",
-        description="全球红树林 GEDI + AlphaEarth 数据制备流程",
+        description="全球红树林 GEDI + AlphaEarth MEOW-14 分区建模流程",
     )
     parser.add_argument("--config", default="config.yaml", help="配置文件路径，默认 config.yaml")
     parser.add_argument("--project", dest="project_override", default=None, help="本次运行使用的 GEE project，不修改 config.yaml")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("inspect-gee", help="检查 GEE 登录和数据集可访问性")
-    sub.add_parser("sync-config", help="把新增默认配置字段补入已有 config.yaml，不覆盖已有值")
+    sub.add_parser("sync-config", help="同步 MEOW-14 配置，并迁移已废弃的全局 R 配置")
 
     p_guide = sub.add_parser("windows-guide", help="供Windows双击脚本显示中文说明")
     p_guide.add_argument("name", choices=sorted(windows_ui.GUIDES))
@@ -150,16 +146,6 @@ def main() -> None:
 
     p_r_check = sub.add_parser("check-r-environment", help="步骤6a：检查或安装 R/ranger 环境")
     p_r_check.add_argument("--interactive", action="store_true", help="找不到 R 时按中文提示下载安装")
-    p_prepare_training = sub.add_parser("prepare-training-samples", help="步骤6b：生成固定训练划分和 GEE 上传 CSV")
-    p_prepare_training.add_argument("--input", default=None, help="聚合训练 Parquet 路径")
-    p_prepare_training.add_argument("--output-csv", default=None, help="GEE 网页上传 CSV 输出路径")
-    p_tune = sub.add_parser("tune-ranger", help="步骤6c：R/ranger 重复 OOB 调参")
-    p_tune.add_argument("--quick", action="store_true", help="只运行前5组参数，供环境验证使用")
-    p_models = sub.add_parser("submit-gee-models", help="步骤6d：提交 GEE 70%% 与全样本回归模型")
-    p_models.add_argument("--training-asset", default=None, help="Earth Engine 网页上传后的训练 TABLE Asset 路径")
-    p_models.add_argument("--version", default=None, help="模型版本号，例如 v001")
-    p_models.add_argument("--interactive", action="store_true", help="以中文提示输入训练 TABLE Asset 路径")
-
     p_regional_prepare = sub.add_parser("prepare-regional-training", help="MEOW-14：区域归属、固定随机划分与训练文件准备")
     p_regional_prepare.add_argument("--input", default=None, help="聚合训练 Parquet 路径")
     p_regional_prepare.add_argument("--output-dir", default=None, help="MEOW-14 输出目录")
@@ -182,8 +168,6 @@ def main() -> None:
     p_regional_models.add_argument("--resubmit-failed", action="store_true", help="显式允许重新提交本地失败清单中的区域")
     p_regional_models.add_argument("--interactive", action="store_true", help="以中文选择 EAS smoke、AME 压力测试或全部调度")
 
-    sub.add_parser("model-placeholder", help="显示建模占位说明")
-
     args = parser.parse_args()
     if args.command == "windows-guide":
         if not windows_ui.run(args.name, confirm=args.confirm):
@@ -191,7 +175,7 @@ def main() -> None:
         return
     if args.command == "sync-config":
         path = sync_config(args.config)
-        print(f"配置已同步到当前版本: {path}")
+        print(f"配置已同步到当前 MEOW-14 版本: {path}")
         return
     if args.command == "auth-project":
         try:
@@ -317,17 +301,6 @@ def main() -> None:
             aggregate_samples.run(cfg, input_dir=args.input_dir, output_path=args.output)
         elif args.command == "check-r-environment":
             r_environment.run(cfg, config_path=args.config, interactive=args.interactive)
-        elif args.command == "prepare-training-samples":
-            prepare_training_samples.run(cfg, input_path=args.input, output_csv=args.output_csv)
-        elif args.command == "tune-ranger":
-            ranger_tuning.run(cfg, quick=args.quick)
-        elif args.command == "submit-gee-models":
-            submit_gee_models.run(
-                cfg,
-                training_asset=args.training_asset,
-                version=args.version,
-                interactive=args.interactive,
-            )
         elif args.command == "prepare-regional-training":
             regional_training.run(
                 cfg,
@@ -358,8 +331,6 @@ def main() -> None:
                     schedule=args.schedule,
                     resubmit_failed=args.resubmit_failed,
                 )
-        elif args.command == "model-placeholder":
-            modeling_placeholder.run()
     except Exception as exc:
         print(f"\n错误：{exc}", file=sys.stderr)
         raise SystemExit(1) from exc

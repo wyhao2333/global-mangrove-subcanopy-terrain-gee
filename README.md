@@ -1,12 +1,15 @@
-# 全球红树林林下地形 GEE 数据制备流程
+# 全球红树林林下地形：GEDI + AlphaEarth MEOW-14 分区建模流程
 
-这个项目用于生成全球红树林林下地形建模所需的训练表：
+这个项目从 GEDI / AlphaEarth 样本制备一直运行到 MEOW-14 分区模型训练：
 
 ```text
 GMW 2020 红树林范围
   -> GEDI 25 m 月度脚印高程 elev_lowestmode
   -> AlphaEarth / Satellite Embedding 10 m 64 维特征
   -> 本地按 10 m embedding 像元做 GEDI 高程中值聚合
+  -> MEOW-14 区域归属与固定随机 70/30 划分
+  -> 本地 ranger 调参和随机内部验证
+  -> GEE 保存 14 个区域回归随机森林 classifier
 ```
 
 正式流程采用“两阶段加下载”：阶段1只提取并保存全部GEDI月度脚印为GEE表资产；步骤4b从表资产按空间块采样AlphaEarth并保存为当前账号的GEE表资产；步骤4c把已验证完成的表资产直接下载到本地，Google Drive 导出保留为备用方式。这避免把几十个月的GEDI点和全球AlphaEarth均值一次性放进同一张计算图，并用真实资产作为可恢复的完成标记。
@@ -15,7 +18,9 @@ GMW 2020 红树林范围
 
 项目已核验这 201 个瓦片在 GEE 中全部有对应 GEDI 数据，2019-2025 合计 12,688 张月度瓦片影像，每个空间瓦片包含 55-64 个月；内部仍逐月提取，不做时间合成。
 
-本项目只做数据制备。机器学习建模和调参暂时不做，后续可以接 Python、R 或 GEE 模型。
+当前唯一的训练流程是 **MEOW-14 分区建模**。每区独立调参、独立训练；本轮只保存区域 classifier，不启动全球 10 m 预测、区域拼接或边界羽化。
+
+从旧版本升级时，先双击 `run_00b_sync_config.bat`：它会删除已废弃的 `modeling` 配置块，并将原有 `modeling.rscript_path` 自动迁移到 `regional_modeling.rscript_path`。
 
 ## 重要提醒
 
@@ -545,7 +550,7 @@ outputs/training/mangrove_gedi_alphaearth_training.preview.csv
 
 ### 14. 推荐流程：MEOW-14 分区建模
 
-步骤5聚合完成后，请使用本节的 **MEOW-14 区域流程**。旧的 `run_06b_prepare_training.bat`、`run_06c_tune_ranger.bat` 与 `run_06d_submit_gee_models.bat` 仍保留用于回溯旧版全局实验，但不是本项目当前的生产流程。
+步骤5聚合完成后，继续执行本节的 **MEOW-14 区域流程**。
 
 本流程使用 14 个 MEOW 派生区，而不是逐一训练 232 个原始生态区。预测变量严格为 AlphaEarth 时间均值 `A00-A63`；标签为 2019-2025 GEDI `elev_lowestmode` 的10 m像元中值。结果属于经验统计下推：本地 test30 只是对 GEDI 聚合标签的随机内部验证，不可替代 LiDAR/RTK 外部验证，也不能直接称作真实林下地形精度。
 
@@ -555,7 +560,7 @@ outputs/training/mangrove_gedi_alphaearth_training.preview.csv
 
 #### 14.1 先检查 R：双击 `run_06a_check_r.bat`
 
-检查 `Rscript.exe`、`ranger`、`data.table` 和 `ggplot2`。未检测到 R 时会显示 CRAN 下载地址和建议安装目录；直接回车确认、输入新目录修改，或输入 `N` 取消。成功后实际 R 路径会保存到 `config.yaml` 的 `modeling.rscript_path`。
+检查 `Rscript.exe`、`ranger`、`data.table` 和 `ggplot2`。未检测到 R 时会显示 CRAN 下载地址和建议安装目录；直接回车确认、输入新目录修改，或输入 `N` 取消。成功后实际 R 路径会保存到 `config.yaml` 的 `regional_modeling.rscript_path`。
 
 #### 14.2 准备区域样本：双击 `run_06b_prepare_meow14_training.bat`
 
@@ -646,7 +651,7 @@ projects/your-project/assets/global_mangrove_subcanopy_terrain/models/meow14_v00
 
 已存在的同版本 classifier asset 会直接标记为完成并跳过。失败任务只记录在 `logs/meow14_gee_model_jobs_<project>_v001.csv`，不会自动降采样、覆盖或重提；选项 `4` 才会显式重提失败区域。全14区调度也会生成一个包含参数、样本数与来源表路径的元数据 TABLE Asset。
 
-本轮到此为止：不训练全局 `AllSamples` classifier，不启动全球10 m预测，不做区域拼接或边界羽化。
+本轮到此为止：不启动全球10 m预测，不做区域拼接或边界羽化。
 
 ## PowerShell 运行方式
 
