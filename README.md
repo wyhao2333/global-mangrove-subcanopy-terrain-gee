@@ -543,77 +543,110 @@ outputs/training/mangrove_gedi_alphaearth_training.preview.csv
 
 其中 `.parquet` 是正式训练表，`.preview.csv` 是方便打开看的预览表。
 
-### 14. 本地 R 调参与 GEE 模型
+### 14. 推荐流程：MEOW-14 分区建模
 
-步骤5聚合完成后，按以下顺序继续。每一个双击入口都会先显示中文说明，只有输入大写 `Y` 才会执行。
+步骤5聚合完成后，请使用本节的 **MEOW-14 区域流程**。旧的 `run_06b_prepare_training.bat`、`run_06c_tune_ranger.bat` 与 `run_06d_submit_gee_models.bat` 仍保留用于回溯旧版全局实验，但不是本项目当前的生产流程。
 
-#### 14.1 双击 `run_06a_check_r.bat`
+本流程使用 14 个 MEOW 派生区，而不是逐一训练 232 个原始生态区。预测变量严格为 AlphaEarth 时间均值 `A00-A63`；标签为 2019-2025 GEDI `elev_lowestmode` 的10 m像元中值。结果属于经验统计下推：本地 test30 只是对 GEDI 聚合标签的随机内部验证，不可替代 LiDAR/RTK 外部验证，也不能直接称作真实林下地形精度。
+
+采用生态分区的依据是，大尺度森林高度研究已表明生态区随机森林可降低单一全域模型的区域非平稳性（Wu and Shi, 2023, *IEEE TGRS*）；GEDI 与连续遥感特征结合进行壁到壁制图也已有全球实践（Potapov et al., 2021, *Remote Sensing of Environment*）。这些研究支持分区基线的合理性，但不等同于证明本项目的真实地形精度。尤其是本项目暂不使用 DEM、SAR 或坐标特征，较 RFDTM 等多源林下地形方案更简化；获得独立 LiDAR/RTK 后仍须开展外部验证。
+
+每一个双击入口都会先显示中文说明，只有输入大写 `Y` 才会执行。
+
+#### 14.1 先检查 R：双击 `run_06a_check_r.bat`
 
 检查 `Rscript.exe`、`ranger`、`data.table` 和 `ggplot2`。未检测到 R 时会显示 CRAN 下载地址和建议安装目录；直接回车确认、输入新目录修改，或输入 `N` 取消。成功后实际 R 路径会保存到 `config.yaml` 的 `modeling.rscript_path`。
 
-#### 14.2 双击 `run_06b_prepare_training.bat`
+#### 14.2 准备区域样本：双击 `run_06b_prepare_meow14_training.bat`
 
-读取步骤5产生的聚合表，建立固定种子42的随机70/30划分，并生成：
+运行前确认两项配置：
 
-```text
-outputs/training/mangrove_gedi_alphaearth_training_with_split.parquet
-outputs/training/mangrove_gedi_alphaearth_training_for_gee_upload.csv
-outputs/training/ranger_tuning_train_pool.csv
-outputs/training/ranger_validation_test_pool.csv
-outputs/training/mangrove_gedi_alphaearth_training_sample_summary.json
+```yaml
+regional_modeling:
+  # 本机的 14 区 Shapefile，不会随 GitHub 公开仓库提交。
+  region_shp: 区域划分结果/coastal_belt_irregular_mangrove_regions_shapefile/coastal_belt_irregular_mangrove_regions.shp
+  # 步骤5产生的完整聚合训练 Parquet；当前默认使用 data/ 下的已聚合文件。
+  input_training_parquet: data/mangrove_gedi_alphaearth_training.parquet
 ```
 
-完整上传表含有 `longitude`、`latitude`、`sample_id`、`split`、`elev_median`、`A00-A63`；两个调参池只供 R 使用，避免重复载入完整全球表。
+程序用 `pyogrio + shapely + pyarrow` 分批读取 Parquet，严格要求每个像元只命中一个区域；任意未归属或多重归属都会终止，不会悄悄分配。每区按 `ae_x + ae_y + seed=42` 的稳定哈希随机划分约70% `train` 和30% `test`，同一10 m像元不会进入两个集合。
 
-#### 14.3 在 Earth Engine 网页上传训练表
-
-1. 打开 [Earth Engine Code Editor](https://code.earthengine.google.com/)，在左侧 **Assets** 选择 **NEW**、**Table upload**。
-2. 选择 `outputs/training/mangrove_gedi_alphaearth_training_for_gee_upload.csv`。
-3. 坐标字段选择 `longitude`、`latitude`，坐标系选 `EPSG:4326`。
-4. 等待上传完成，记录完整 `TABLE Asset` 路径，例如：
+完成后会生成：
 
 ```text
-projects/your-project/assets/global_mangrove_subcanopy_terrain/training/mangrove_training_v001
+outputs/training/meow14/region_assignment_audit.json
+outputs/training/meow14/region_manifest.csv
+outputs/training/meow14/regions/<REG_CODE>/<REG_CODE>_all_with_split.parquet
+outputs/training/meow14/regions/<REG_CODE>/<REG_CODE>_train70.csv
+outputs/training/meow14/regions/<REG_CODE>/<REG_CODE>_test30.csv
 ```
 
-#### 14.4 双击 `run_06c_tune_ranger.bat`
+`region_manifest.csv` 是后续 R 与 GEE 的唯一文件清单。它应有14行，分别为 `AFW, AFE, RSG, IND, EAS, SEW, SEE, OCN, AUS, PAC, AMW, GMX, CAR, AME`。
 
-执行 240 组随机森林回归参数的重复 OOB RMSE 评估：树数最高400，每组默认重复5次。每次从固定70%训练池随机抽取 `min(10%, 200,000)` 个像元；30%测试池只用于最终精度报告。
+#### 14.3 逐区调参：双击 `run_06c_tune_meow14_ranger.bat`
+
+每区只读取该区完整 `train70`，独立进行5次10%无放回子样本抽取。每个重复内的样本固定，并被全部24组参数共用：`trees=100/200/300`、`mtry=8/16`、`bagFraction=0.5/0.632`、`min.node.size=5/10`；`ranger` 明确使用 `replace=FALSE`。按重复 OOB RMSE 均值排名，取前10组参数的均值作为该区 GEE 参数，再在同一批训练子样本上进行 OOB 确认。
 
 结果写入：
 
 ```text
-outputs/training/ranger_tuning/ranger_oob_ranking.csv
-outputs/training/ranger_tuning/ranger_top10_params.csv
-outputs/training/ranger_tuning/ranger_top10_mean_params_for_gee.csv
-outputs/training/ranger_tuning/ranger_top10_mean_validation_summary.csv
-outputs/training/ranger_tuning/figures/
+outputs/training/meow14/ranger_tuning/<REG_CODE>/ranger_oob_ranking.csv
+outputs/training/meow14/ranger_tuning/<REG_CODE>/ranger_top10_mean_params_for_gee.csv
+outputs/training/meow14/ranger_tuning/regional_tuning_summary.csv
 ```
 
-#### 14.5 双击 `run_06d_submit_gee_models.bat`
+#### 14.4 本地最终模型与精度：双击 `run_06d_evaluate_meow14_ranger.bat`
 
-填写上一步上传完成的训练 `TABLE Asset` 路径。程序读取前10平均参数并提交两个 GEE 回归模型：
+每区按自己的最优参数，用完整 `train70` 拟合一个本地 `ranger` 模型，再分批预测完整锁定 `test30`。输出各区以及全部区域的加权指标与宏平均指标：`RMSE`、`MAE`、`Bias`、`R2`、残差分位数，并按 `elev_count` 与 `elev_iqr` 生成标签稳定性诊断。
 
 ```text
-.../models/RF_GlobalMangroveTerrain_Train70_v001
-.../models/RF_GlobalMangroveTerrain_AllSamples_v001
+outputs/training/meow14/ranger_evaluation/regional_evaluation_summary.csv
+outputs/training/meow14/ranger_evaluation/regional_evaluation_overall_metrics.csv
+outputs/training/meow14/ranger_evaluation/regional_test_diagnostics_by_label_stability.csv
+outputs/training/meow14/ranger_evaluation/figures/
 ```
 
-第一个模型使用固定70%样本，第二个使用全部有效像元。资产已存在时自动跳过；本轮只训练并保存分类器，不启动全球10m制图任务。
+不要把这些数值写成独立外部验证精度；未来有 LiDAR/RTK 后，还需统一垂直基准和潮位参考，再按独立站点或空间块验证。
 
-可选配置：
+#### 14.5 上传14个 GEE 训练表
 
-```yaml
-modeling:
-  rscript_path: ""
-  gee_training_asset: ""
-  model_version: v001
-  split_seed: 42
-  train_fraction: 0.70
-  tuning_repeats: 5
-  tuning_subsample_fraction: 0.10
-  tuning_max_rows_per_repeat: 200000
+对每个区域，在 [Earth Engine Code Editor](https://code.earthengine.google.com/) 的 **Assets → NEW → Table upload** 上传对应的：
+
+```text
+outputs/training/meow14/regions/<REG_CODE>/<REG_CODE>_train70.csv
 ```
+
+坐标字段选择 `longitude` 与 `latitude`，坐标系为 `EPSG:4326`。上传到配置给出的目录，并使用精确名称 `<REG_CODE>_train70`。例如版本 `v001`、区域 EAS：
+
+```text
+projects/your-project/assets/global_mangrove_subcanopy_terrain/training/meow14_v001/EAS_train70
+```
+
+不要上传 `*_test30.csv` 到 GEE；它只用于本地内部评估。14个 CSV 都含 `sample_id`、`REG_CODE`、`split`、经纬度、标签稳定性字段和 `A00-A63`，模型实际只使用 `elev_median` 与 `A00-A63`。
+
+#### 14.6 检查上传结果：双击 `run_06e_check_meow14_gee_assets.bat`
+
+程序会逐一确认全部训练资产可读、类型为 `TABLE`、`split/elev_median/A00-A63` 完整，且有效 `train` 行数和本地 `region_manifest.csv` 一致。检查结果保存为：
+
+```text
+outputs/training/meow14/gee_training_asset_check.csv
+```
+
+任一资产不可读时，先检查当前 `gee.project` 凭证、网页上传 project 与 Asset 路径是否一致。
+
+#### 14.7 提交区域 GEE 模型：双击 `run_06f_submit_meow14_gee_models.bat`
+
+按顺序操作：先选 `1` 提交 EAS smoke test；EAS 的 classifier asset 完成后，再选 `2` 提交 AME 最大区压力测试；确认最大区可完成后，选 `3` 持续调度全部14区。调度器会读取本地任务清单和实际 classifier asset，最多保留3个当前账号的活跃 GEE 任务。
+
+每区的模型资产命名为：
+
+```text
+projects/your-project/assets/global_mangrove_subcanopy_terrain/models/meow14_v001/RF_MangroveSubcanopy_MEOW14_<REG_CODE>_Train70_v001
+```
+
+已存在的同版本 classifier asset 会直接标记为完成并跳过。失败任务只记录在 `logs/meow14_gee_model_jobs_<project>_v001.csv`，不会自动降采样、覆盖或重提；选项 `4` 才会显式重提失败区域。全14区调度也会生成一个包含参数、样本数与来源表路径的元数据 TABLE Asset。
+
+本轮到此为止：不训练全局 `AllSamples` classifier，不启动全球10 m预测，不做区域拼接或边界羽化。
 
 ## PowerShell 运行方式
 
@@ -732,13 +765,21 @@ powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
 .\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml aggregate
 ```
 
-### R 调参与模型训练
+### MEOW-14 分区建模
 
 ```powershell
 .\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml check-r-environment --interactive
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml prepare-training-samples
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml tune-ranger
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml submit-gee-models --interactive
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml prepare-regional-training
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml tune-regional-ranger
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml evaluate-regional-ranger
+# 先在网页上传14个 <REG_CODE>_train70.csv，并完成资产检查。
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml check-regional-gee-assets
+# EAS smoke test：
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml submit-regional-gee-models --regions EAS --once
+# AME 压力测试：
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml submit-regional-gee-models --regions AME --once
+# 两项确认后，开始完整14区、最多3任务的持续调度：
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml submit-regional-gee-models --schedule
 ```
 
 ## 数据字段说明

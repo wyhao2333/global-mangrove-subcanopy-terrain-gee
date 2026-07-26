@@ -19,13 +19,16 @@ from . import (
     modeling_placeholder,
     prepare_training_samples,
     prepare_gmw,
+    regional_gee_models,
+    regional_ranger,
+    regional_training,
     r_environment,
     ranger_tuning,
     submit_gee_models,
     validate_native,
     windows_ui,
 )
-from .config import ensure_output_dirs, load_config
+from .config import ensure_output_dirs, load_config, sync_config
 
 
 def _years(value: str) -> list[int]:
@@ -45,6 +48,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("inspect-gee", help="检查 GEE 登录和数据集可访问性")
+    sub.add_parser("sync-config", help="把新增默认配置字段补入已有 config.yaml，不覆盖已有值")
 
     p_guide = sub.add_parser("windows-guide", help="供Windows双击脚本显示中文说明")
     p_guide.add_argument("name", choices=sorted(windows_ui.GUIDES))
@@ -156,12 +160,38 @@ def main() -> None:
     p_models.add_argument("--version", default=None, help="模型版本号，例如 v001")
     p_models.add_argument("--interactive", action="store_true", help="以中文提示输入训练 TABLE Asset 路径")
 
+    p_regional_prepare = sub.add_parser("prepare-regional-training", help="MEOW-14：区域归属、固定随机划分与训练文件准备")
+    p_regional_prepare.add_argument("--input", default=None, help="聚合训练 Parquet 路径")
+    p_regional_prepare.add_argument("--output-dir", default=None, help="MEOW-14 输出目录")
+    p_regional_prepare.add_argument("--batch-rows", type=int, default=100000, help="每批读取的 Parquet 行数")
+    p_regional_prepare.add_argument("--max-rows", type=int, default=None, help="仅处理前 N 行，供小样本验证")
+    p_regional_prepare.add_argument("--overwrite", action="store_true", help="明确删除旧的 MEOW-14 输出目录后重建")
+    p_regional_tune = sub.add_parser("tune-regional-ranger", help="MEOW-14：逐区 ranger 重复 OOB 调参")
+    p_regional_tune.add_argument("--quick", action="store_true", help="仅 1 次重复和 2 组参数，用于环境测试")
+    p_regional_tune.add_argument("--regions", nargs="*", default=None, help="仅运行指定区域，如 EAS AME")
+    p_regional_evaluate = sub.add_parser("evaluate-regional-ranger", help="MEOW-14：完整 train70 本地拟合与 test30 评估")
+    p_regional_evaluate.add_argument("--quick", action="store_true", help="仅评估第一个区域，用于环境测试")
+    p_regional_evaluate.add_argument("--regions", nargs="*", default=None, help="仅运行指定区域，如 EAS AME")
+    p_regional_check = sub.add_parser("check-regional-gee-assets", help="MEOW-14：检查 14 个网页上传的 Train70 TABLE Assets")
+    p_regional_check.add_argument("--regions", nargs="*", default=None, help="仅检查指定区域")
+    p_regional_check.add_argument("--skip-count-check", action="store_true", help="只检查资产类型和读取权限，不逐表统计行数")
+    p_regional_models = sub.add_parser("submit-regional-gee-models", help="MEOW-14：提交区域 GEE 回归随机森林")
+    p_regional_models.add_argument("--regions", nargs="*", default=None, help="仅提交指定区域，如 EAS AME")
+    p_regional_models.add_argument("--once", action="store_true", help="只检查并提交一轮可用空位，然后退出")
+    p_regional_models.add_argument("--schedule", action="store_true", help="持续调度，始终最多 3 个总活跃任务")
+    p_regional_models.add_argument("--resubmit-failed", action="store_true", help="显式允许重新提交本地失败清单中的区域")
+    p_regional_models.add_argument("--interactive", action="store_true", help="以中文选择 EAS smoke、AME 压力测试或全部调度")
+
     sub.add_parser("model-placeholder", help="显示建模占位说明")
 
     args = parser.parse_args()
     if args.command == "windows-guide":
         if not windows_ui.run(args.name, confirm=args.confirm):
             raise SystemExit(2)
+        return
+    if args.command == "sync-config":
+        path = sync_config(args.config)
+        print(f"配置已同步到当前版本: {path}")
         return
     if args.command == "auth-project":
         try:
@@ -298,6 +328,36 @@ def main() -> None:
                 version=args.version,
                 interactive=args.interactive,
             )
+        elif args.command == "prepare-regional-training":
+            regional_training.run(
+                cfg,
+                source=args.input,
+                destination=args.output_dir,
+                batch_rows=args.batch_rows,
+                max_rows=args.max_rows,
+                overwrite=args.overwrite,
+            )
+        elif args.command == "tune-regional-ranger":
+            regional_ranger.tune(cfg, quick=args.quick, region_codes=args.regions)
+        elif args.command == "evaluate-regional-ranger":
+            regional_ranger.evaluate(cfg, quick=args.quick, region_codes=args.regions)
+        elif args.command == "check-regional-gee-assets":
+            regional_gee_models.check_assets(
+                cfg,
+                region_codes=args.regions,
+                include_count=not args.skip_count_check,
+            )
+        elif args.command == "submit-regional-gee-models":
+            if args.interactive:
+                regional_gee_models.interactive_submit(cfg)
+            else:
+                regional_gee_models.submit(
+                    cfg,
+                    region_codes=args.regions,
+                    once=args.once,
+                    schedule=args.schedule,
+                    resubmit_failed=args.resubmit_failed,
+                )
         elif args.command == "model-placeholder":
             modeling_placeholder.run()
     except Exception as exc:

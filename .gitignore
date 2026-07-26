@@ -51,3 +51,7 @@ logs/*
 # Tables produced by sampling
 *.parquet
 *.csv
+
+# Local MEOW-14 source boundaries and derived point layers
+区域划分结果/
+data/mangrove_gedi_alphaearth_training_points_shp/

@@ -59,6 +59,41 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "alpha_min_chunk_degrees": 0.0625,
     },
     "aggregation": {"min_elev_count": 1, "preview_csv_rows": 10000},
+    "modeling": {
+        "rscript_path": "",
+        "gee_training_asset": "",
+        "model_version": "v001",
+        "split_seed": 42,
+        "train_fraction": 0.70,
+        "tuning_repeats": 5,
+        "tuning_subsample_fraction": 0.10,
+        "tuning_max_rows_per_repeat": 200000,
+    },
+    "regional_modeling": {
+        # 14 个项目建模区由 MEOW 232 个原始生态区归并而来；原始矢量不随代码仓库提交。
+        "region_shp": "区域划分结果/coastal_belt_irregular_mangrove_regions_shapefile/coastal_belt_irregular_mangrove_regions.shp",
+        "region_code_field": "REG_CODE",
+        "region_name_field": "REGION",
+        "input_training_parquet": "data/mangrove_gedi_alphaearth_training.parquet",
+        "output_dir": "outputs/training/meow14",
+        "split_seed": 42,
+        "train_fraction": 0.70,
+        "tuning_repeats": 5,
+        "tuning_subsample_fraction": 0.10,
+        "tuning_grid_trees": [100, 200, 300],
+        "tuning_grid_mtry": [8, 16],
+        "tuning_grid_bag_fraction": [0.5, 0.632],
+        "tuning_grid_min_node_size": [5, 10],
+        # 仅用于加速严格点面归属：被一个区域完整覆盖的 0.1° 格网直接赋值，边界格网仍逐点精确判断。
+        "assignment_grid_degrees": 0.1,
+        "prediction_batch_rows": 100000,
+        "save_local_models": False,
+        "model_version": "v001",
+        "gee_training_asset_root": "projects/{project}/assets/global_mangrove_subcanopy_terrain/training/meow14_{model_version}",
+        "gee_model_asset_root": "projects/{project}/assets/global_mangrove_subcanopy_terrain/models/meow14_{model_version}",
+        "gee_max_concurrent_tasks": 3,
+        "gee_poll_minutes": 10,
+    },
 }
 
 
@@ -82,6 +117,24 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             loaded = yaml.safe_load(f) or {}
         _deep_update(cfg, loaded)
     return cfg
+
+
+def sync_config(config_path: str | Path | None = None) -> Path:
+    """把新增默认字段写入已有配置，但不覆盖用户已经设置的值。"""
+    root = project_root()
+    path = Path(config_path) if config_path else root / "config.yaml"
+    if not path.is_absolute():
+        path = root / path
+    existing: dict[str, Any] = {}
+    if path.exists():
+        with path.open("r", encoding="utf-8") as f:
+            existing = yaml.safe_load(f) or {}
+    merged = deepcopy(DEFAULT_CONFIG)
+    _deep_update(merged, existing)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        yaml.safe_dump(merged, f, allow_unicode=True, sort_keys=False)
+    return path
 
 
 def resolve_path(cfg: dict[str, Any], key: str) -> Path:
