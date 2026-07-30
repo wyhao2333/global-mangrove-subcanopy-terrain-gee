@@ -16,12 +16,16 @@ from . import (
     export_native_tiles,
     export_samples,
     export_staged,
+    gedi_qc_pilot,
     inspect_gee,
     prepare_gmw,
     regional_gee_models,
     regional_ranger,
     regional_training,
     r_environment,
+    sample_qc,
+    sample_qc_ranger,
+    sample_qc_report,
     validate_native,
     windows_ui,
 )
@@ -151,6 +155,17 @@ def main() -> None:
     p_egm2008.add_argument("--grid", default=None, help="PROJ 可读取的 EGM2008 GeoTIFF 路径")
     p_egm2008.add_argument("--analysis-dir", default=None, help="统计表、图件和候选异常点输出目录")
     p_egm2008.add_argument("--overwrite", action="store_true", help="明确允许覆盖已有 EGM2008 输出 Parquet")
+
+    p_qc_prepare = sub.add_parser("prepare-sample-qc", help="样本 QC 试验：生成范围、局地 MAD 与重访稳定性标记")
+    p_qc_prepare.add_argument("--overwrite", action="store_true", help="明确允许重建已有 QC 标记和审计结果")
+    sub.add_parser("inspect-gedi-qc-bands", help="样本 QC 试验：只读检查 GEDI 原始质量字段")
+    p_qc_pilot = sub.add_parser("export-gedi-qc-pilot", help="样本 QC 试验：导出 14 个 GEDI 原始质量字段小块")
+    p_qc_pilot.add_argument("--max-regions", type=int, default=None, help="最多处理多少个 MEOW 区域，用于小样本检查")
+    p_qc_pilot.add_argument("--submit", action="store_true", help="明确确认后才创建临时 GEE Table Asset；默认仅预览")
+    p_qc_inputs = sub.add_parser("prepare-sample-qc-model-inputs", help="样本 QC 试验：生成固定参数 ranger 对照输入")
+    p_qc_inputs.add_argument("--overwrite", action="store_true", help="明确允许重建已有候选模型 CSV")
+    sub.add_parser("evaluate-sample-qc-candidates", help="样本 QC 试验：运行固定参数 ranger 内部对照")
+    sub.add_parser("create-sample-qc-report", help="样本 QC 试验：生成中文 Word 审计报告")
 
     p_r_check = sub.add_parser("check-r-environment", help="步骤6a：检查或安装 R/ranger 环境")
     p_r_check.add_argument("--interactive", action="store_true", help="找不到 R 时按中文提示下载安装")
@@ -316,6 +331,18 @@ def main() -> None:
                 analysis_dir=args.analysis_dir,
                 overwrite=args.overwrite,
             )
+        elif args.command == "prepare-sample-qc":
+            sample_qc.run(cfg, overwrite=args.overwrite)
+        elif args.command == "inspect-gedi-qc-bands":
+            gedi_qc_pilot.inspect_bands(cfg)
+        elif args.command == "export-gedi-qc-pilot":
+            gedi_qc_pilot.export(cfg, max_regions=args.max_regions, submit=args.submit)
+        elif args.command == "prepare-sample-qc-model-inputs":
+            sample_qc.prepare_model_inputs(cfg, overwrite=args.overwrite)
+        elif args.command == "evaluate-sample-qc-candidates":
+            sample_qc_ranger.evaluate(cfg)
+        elif args.command == "create-sample-qc-report":
+            sample_qc_report.run(cfg)
         elif args.command == "check-r-environment":
             r_environment.run(cfg, config_path=args.config, interactive=args.interactive)
         elif args.command == "prepare-regional-training":

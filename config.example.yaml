@@ -68,6 +68,33 @@ aggregation:
   min_elev_count: 1
   preview_csv_rows: 10000
 
+# 样本筛选试验：只生成候选 QC 标记、审计和内部对照，不覆盖原始 EGM2008 训练表。
+sample_qc_experiment:
+  input_training_parquet: data/mangrove_gedi_alphaearth_training_egm2008.parquet
+  output_dir: outputs/analysis/sample_qc_experiment
+  split_seed: 42
+  train_fraction: 0.70
+  h3_resolution: 8
+  h3_min_samples: 5
+  spatial_absolute_residual_m: 5.0
+  spatial_robust_z_threshold: 6.0
+  spatial_mad_floor_m: 0.5
+  # 仅作敏感性对照，不是全球红树林的生物学绝对高程范围。
+  range_min_m: -20.0
+  range_max_m: 50.0
+  repeat_iqr_thresholds_m: [1.0, 2.0, 5.0]
+  repeat_reference_iqr_threshold_m: 2.0
+  model_train_cap_per_region: 10000
+  model_test_cap_per_region: 5000
+  model_number_of_trees: 300
+  model_mtry: 16
+  model_bag_fraction: 0.632
+  model_min_node_size: 5
+  gedi_pilot_asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain/qc_pilot
+  gedi_pilot_min_cell_samples: 50
+  gedi_pilot_max_cell_samples: 5000
+  gedi_pilot_max_regions: 14
+
 # 步骤5b：GEDI 聚合标签由 WGS84 椭球高改正为 EGM2008 正高。
 # 输入文件不会被修改；输出文件的 elev_median 为 EGM2008 正高，原值保留为 elev_median_wgs84。
 vertical_datum:
@@ -89,10 +116,9 @@ regional_modeling:
   # 正式输入是步骤 5b 生成的 EGM2008 正高 Parquet；原始椭球高表不参与新一轮建模。
   input_training_parquet: data/mangrove_gedi_alphaearth_training_egm2008.parquet
   # 新版本结果与旧椭球高训练结果分开存放，避免相互覆盖或混用。
-  output_dir: outputs/training/meow14_egm2008_qc_v001
-  # 保守的标签完整性筛选，不是红树林的生物学绝对高程分布范围；
-  # 数值依据、适用边界和推荐引用见 docs/EGM2008_ELEVATION_QC_RATIONALE.md；边界值会保留。
-  elevation_qc_enabled: true
+  output_dir: outputs/training/meow14_egm2008_baseqa_v002
+  # 绝对高程范围尚在 sample_qc_experiment 中做敏感性对照，生产流程默认不删样本。
+  elevation_qc_enabled: false
   elevation_min_m: -20.0
   elevation_max_m: 50.0
   # 步骤6a检测或安装后自动写入实际 Rscript.exe 路径。
@@ -109,7 +135,7 @@ regional_modeling:
   assignment_grid_degrees: 0.1
   prediction_batch_rows: 100000
   save_local_models: false
-  model_version: egm2008_qc_v001
+  model_version: egm2008_baseqa_v002
   # 上传后的 14 个 TABLE Assets 应命名为 AFW_train70、AFE_train70 ... AME_train70。
   gee_training_asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain/training/meow14_{model_version}
   gee_model_asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain/models/meow14_{model_version}

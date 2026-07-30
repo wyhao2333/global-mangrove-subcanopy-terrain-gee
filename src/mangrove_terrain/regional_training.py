@@ -51,6 +51,7 @@ class RegionIndex:
     ids: np.ndarray
     tree: STRtree
     repaired_codes: tuple[str, ...] = ()
+    repair_method: str = "not_needed"
 
 
 def _now() -> str:
@@ -77,6 +78,25 @@ def add_stable_sample_fields(data: pd.DataFrame, *, seed: int, train_fraction: f
     return result
 
 
+def _repair_region_geometries(geometry: np.ndarray) -> tuple[np.ndarray, np.ndarray, str]:
+    """修复自相交面，并优先保留原面在 GEOS 中表达的实际覆盖范围。"""
+    invalid = ~shapely.is_valid(geometry)
+    if not invalid.any():
+        return geometry, invalid, "not_needed"
+
+    # MEOW-14 源面包含自相交环。对该类面，make_valid() 可能把原本连续的
+    # 覆盖范围拆成带孔洞的多面；buffer(0) 在本项目的面上保留了原始覆盖范围。
+    repaired = geometry.copy()
+    repaired[invalid] = shapely.buffer(geometry[invalid], 0.0)
+    unresolved = shapely.is_empty(repaired) | ~shapely.is_valid(repaired)
+    if not unresolved.any():
+        return repaired, invalid, "buffer(0)"
+
+    # 仅在 buffer(0) 仍不能给出有效面时使用保守回退，并继续走后续的完整性检查。
+    repaired[unresolved] = shapely.make_valid(repaired[unresolved])
+    return repaired, invalid, "buffer(0); make_valid fallback"
+
+
 def load_region_index(cfg: dict) -> RegionIndex:
     """以 pyogrio + Shapely 读取 MEOW-14 面，不使用 GeoPandas。"""
     path = region_shapefile(cfg)
@@ -101,11 +121,8 @@ def load_region_index(cfg: dict) -> RegionIndex:
     codes = np.asarray(table[code_field].to_pylist(), dtype=object)
     if len(set(codes.tolist())) != len(codes) or any(not str(code).strip() for code in codes):
         raise ValueError(f"区域字段 {code_field} 必须是 14 个唯一且非空的区域代码。")
-    invalid = ~shapely.is_valid(geometry)
+    geometry, invalid, repair_method = _repair_region_geometries(geometry)
     repaired_codes = tuple(str(code) for code in codes[invalid])
-    if invalid.any():
-        # 当前 MEOW-14 文件含有自相交环。修复行为会写入审计，随后仍以“每点恰好一个面”严格检查。
-        geometry = shapely.make_valid(geometry)
     if np.any(shapely.is_empty(geometry)) or np.any(~shapely.is_valid(geometry)):
         raise ValueError("区域 Shapefile 存在无法修复的空或无效几何，不能进行严格归属。")
     # 允许共享边界，但不允许面积重叠；否则“一个像元只归属一个区”没有明确答案。
@@ -122,6 +139,7 @@ def load_region_index(cfg: dict) -> RegionIndex:
         ids=np.asarray(table["REGION_ID"].to_pylist(), dtype=int),
         tree=STRtree(geometry),
         repaired_codes=repaired_codes,
+        repair_method=repair_method,
     )
 
 
@@ -329,6 +347,7 @@ def run(
         "region_shapefile": str(region_shapefile(cfg).resolve()),
         "region_count": int(len(index.codes)),
         "geometry_repaired_region_codes": list(index.repaired_codes),
+        "geometry_repair_method": index.repair_method,
         "split_seed": split_seed,
         "train_fraction": train_fraction,
         "assignment_grid_degrees": float(regional.get("assignment_grid_degrees", 0.1)),
@@ -359,7 +378,9 @@ def run(
         console.print("[yellow]EGM2008 标签质控已关闭，本次不会按绝对高程范围筛选。[/yellow]")
     if index.repaired_codes:
         console.print(
-            "[yellow]检测到并修复自相交区域面：" + ", ".join(index.repaired_codes) + "。修复记录将写入审计文件。[/yellow]"
+            "[yellow]检测到并修复自相交区域面："
+            + ", ".join(index.repaired_codes)
+            + f"；方法为 {index.repair_method}。修复记录将写入审计文件。[/yellow]"
         )
     console.print("将按 ae_x/ae_y 的固定哈希划分每区约 70% train 与 30% test。")
     try:
