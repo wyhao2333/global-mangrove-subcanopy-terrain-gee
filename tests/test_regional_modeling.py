@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,7 +13,13 @@ from shapely.strtree import STRtree
 from mangrove_terrain.config import sync_config
 from mangrove_terrain.gee_workflow import ALPHA_BANDS
 from mangrove_terrain.regional_gee_models import _classifier, _refresh_jobs
-from mangrove_terrain.regional_training import RegionIndex, add_stable_sample_fields, assign_region_codes, run
+from mangrove_terrain.regional_training import (
+    RegionIndex,
+    add_stable_sample_fields,
+    assign_region_codes,
+    elevation_qc_mask,
+    run,
+)
 
 
 def make_region_index(count: int = 14) -> RegionIndex:
@@ -30,11 +37,25 @@ class RegionalTrainingTests(unittest.TestCase):
     def test_sync_config_migrates_old_global_rscript_to_regional_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.yaml"
-            path.write_text("modeling:\n  rscript_path: D:/R/Rscript.exe\n", encoding="utf-8")
+            path.write_text(
+                "modeling:\n"
+                "  rscript_path: D:/R/Rscript.exe\n"
+                "regional_modeling:\n"
+                "  input_training_parquet: data/mangrove_gedi_alphaearth_training.parquet\n"
+                "  output_dir: outputs/training/meow14\n"
+                "  model_version: v001\n",
+                encoding="utf-8",
+            )
             sync_config(path)
             loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
             self.assertNotIn("modeling", loaded)
             self.assertEqual(loaded["regional_modeling"]["rscript_path"], "D:/R/Rscript.exe")
+            self.assertEqual(
+                loaded["regional_modeling"]["input_training_parquet"],
+                "data/mangrove_gedi_alphaearth_training_egm2008.parquet",
+            )
+            self.assertEqual(loaded["regional_modeling"]["output_dir"], "outputs/training/meow14_egm2008_qc_v001")
+            self.assertEqual(loaded["regional_modeling"]["model_version"], "egm2008_qc_v001")
 
     def test_assignment_reports_unassigned_and_overlapping_points(self):
         polygons = np.asarray([shapely.box(0, 0, 2, 2), shapely.box(1, 0, 3, 2)])
@@ -56,6 +77,13 @@ class RegionalTrainingTests(unittest.TestCase):
         second = add_stable_sample_fields(data.sample(frac=1, random_state=1), seed=42, train_fraction=0.70).set_index(["ae_x", "ae_y"])
         self.assertEqual(first["sample_id"].to_dict(), second["sample_id"].to_dict())
         self.assertEqual(first["split"].to_dict(), second["split"].to_dict())
+
+    def test_elevation_qc_uses_closed_interval_and_can_be_disabled(self):
+        elevation = pd.Series([-20.01, -20.0, 0.0, 50.0, 50.01])
+        enabled = elevation_qc_mask(elevation, enabled=True, minimum_m=-20.0, maximum_m=50.0)
+        disabled = elevation_qc_mask(elevation, enabled=False, minimum_m=-20.0, maximum_m=50.0)
+        self.assertEqual(enabled.tolist(), [False, True, True, True, False])
+        self.assertTrue(disabled.all())
 
     def test_prepare_creates_all_fourteen_region_manifests(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -93,6 +121,66 @@ class RegionalTrainingTests(unittest.TestCase):
             self.assertEqual(int(manifest["valid_rows"].sum()), 560)
             self.assertTrue((manifest["train_rows"] > 0).all())
             self.assertTrue((manifest["test_rows"] > 0).all())
+
+    def test_prepare_applies_elevation_qc_and_writes_global_and_regional_audits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rows = []
+            for region in range(14):
+                for item in range(40):
+                    elevation = float(region + item / 10)
+                    if region == 0 and item == 0:
+                        elevation = -20.0
+                    elif region == 0 and item == 1:
+                        elevation = 50.0
+                    elif region == 0 and item == 2:
+                        elevation = -20.01
+                    elif region == 0 and item == 3:
+                        elevation = 50.01
+                    row = {
+                        "ae_x": region * 1000 + item,
+                        "ae_y": region * 1000 + item + 10000,
+                        "lon_median": region + 0.1 + item / 10000,
+                        "lat_median": 0.2,
+                        "elev_median": elevation,
+                        "elev_count": 2,
+                        "elev_iqr": 0.3,
+                    }
+                    row.update({band: float(item) for band in ALPHA_BANDS})
+                    rows.append(row)
+            source = root / "input.parquet"
+            pd.DataFrame(rows).to_parquet(source, index=False)
+            destination = root / "out"
+            cfg = {
+                "regional_modeling": {
+                    "input_training_parquet": str(source),
+                    "output_dir": str(destination),
+                    "region_shp": str(root / "unused.shp"),
+                    "split_seed": 42,
+                    "train_fraction": 0.70,
+                    "elevation_qc_enabled": True,
+                    "elevation_min_m": -20.0,
+                    "elevation_max_m": 50.0,
+                }
+            }
+            with patch("mangrove_terrain.regional_training.load_region_index", return_value=make_region_index()):
+                run(cfg)
+
+            audit = json.loads((destination / "elevation_qc_audit.json").read_text(encoding="utf-8"))
+            self.assertEqual(audit["rows_before_qc"], 560)
+            self.assertEqual(audit["rows_below_minimum"], 1)
+            self.assertEqual(audit["rows_above_maximum"], 1)
+            self.assertEqual(audit["rows_retained"], 558)
+            regional_audit = pd.read_csv(destination / "elevation_qc_by_region.csv").set_index("region_code")
+            self.assertEqual(int(regional_audit.loc["R00", "assigned_rows"]), 40)
+            self.assertEqual(int(regional_audit.loc["R00", "retained_rows"]), 38)
+            manifest = pd.read_csv(destination / "region_manifest.csv")
+            self.assertEqual(int(manifest["valid_rows"].sum()), 558)
+            kept = pd.read_parquet(destination / "regions" / "R00" / "R00_all_with_split.parquet")
+            self.assertIn(-20.0, kept["elev_median"].tolist())
+            self.assertIn(50.0, kept["elev_median"].tolist())
+            self.assertFalse((kept["elev_median"] < -20.0).any())
+            self.assertFalse((kept["elev_median"] > 50.0).any())
 
 
 class RegionalGeeTests(unittest.TestCase):

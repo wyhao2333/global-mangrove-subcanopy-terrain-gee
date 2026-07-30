@@ -200,6 +200,21 @@ def _clean_batch(data: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     return result, before - len(result)
 
 
+def elevation_qc_mask(
+    elevation: pd.Series,
+    *,
+    enabled: bool,
+    minimum_m: float,
+    maximum_m: float,
+) -> pd.Series:
+    """按闭区间生成 EGM2008 高程标签质控掩膜。"""
+    if minimum_m > maximum_m:
+        raise ValueError("regional_modeling.elevation_min_m 不能大于 elevation_max_m。")
+    if not enabled:
+        return pd.Series(True, index=elevation.index, dtype=bool)
+    return elevation.ge(minimum_m) & elevation.le(maximum_m)
+
+
 def _write_csv(data: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     data.to_csv(path, mode="a", header=not path.exists(), index=False, encoding="utf-8")
@@ -289,10 +304,25 @@ def run(
     regional = settings(cfg)
     split_seed = int(regional.get("split_seed", 42))
     train_fraction = float(regional.get("train_fraction", 0.70))
+    elevation_qc_enabled = bool(regional.get("elevation_qc_enabled", True))
+    elevation_min_m = float(regional.get("elevation_min_m", -20.0))
+    elevation_max_m = float(regional.get("elevation_max_m", 50.0))
+    if elevation_min_m > elevation_max_m:
+        raise ValueError("regional_modeling.elevation_min_m 不能大于 elevation_max_m。")
     index = load_region_index(cfg)
     paths = _initialize_paths(root, index, overwrite=overwrite)
     parquet_writers: dict[str, pq.ParquetWriter] = {}
     stats = {str(code): {"valid_rows": 0, "train_rows": 0, "test_rows": 0} for code in index.codes}
+    elevation_qc_by_region = {
+        str(code): {
+            "region_code": str(code),
+            "assigned_rows": 0,
+            "below_min_rows": 0,
+            "above_max_rows": 0,
+            "retained_rows": 0,
+        }
+        for code in index.codes
+    }
     audit: dict[str, object] = {
         "created_at": _now(),
         "source_parquet": str(source_path.resolve()),
@@ -309,11 +339,24 @@ def run(
         "rows_multi_assigned": 0,
         "unassigned_examples": [],
         "multi_assigned_examples": [],
+        "elevation_qc": {
+            "enabled": elevation_qc_enabled,
+            "minimum_m": elevation_min_m,
+            "maximum_m": elevation_max_m,
+            "rows_before_qc": 0,
+            "rows_below_minimum": 0,
+            "rows_above_maximum": 0,
+            "rows_retained": 0,
+        },
     }
 
     console.rule("MEOW-14 区域样本准备")
     console.print(f"输入聚合表：{source_path}")
     console.print(f"区域面：{region_shapefile(cfg)}")
+    if elevation_qc_enabled:
+        console.print(f"EGM2008 标签质控：保留 [{elevation_min_m:g}, {elevation_max_m:g}] m（闭区间）。")
+    else:
+        console.print("[yellow]EGM2008 标签质控已关闭，本次不会按绝对高程范围筛选。[/yellow]")
     if index.repaired_codes:
         console.print(
             "[yellow]检测到并修复自相交区域面：" + ", ".join(index.repaired_codes) + "。修复记录将写入审计文件。[/yellow]"
@@ -353,6 +396,29 @@ def run(
                 continue
 
             data["REG_CODE"] = codes
+            qc = audit["elevation_qc"]
+            assert isinstance(qc, dict)
+            below_minimum = data["elev_median"].lt(elevation_min_m)
+            above_maximum = data["elev_median"].gt(elevation_max_m)
+            keep = elevation_qc_mask(
+                data["elev_median"],
+                enabled=elevation_qc_enabled,
+                minimum_m=elevation_min_m,
+                maximum_m=elevation_max_m,
+            )
+            qc["rows_before_qc"] = int(qc["rows_before_qc"]) + len(data)
+            qc["rows_below_minimum"] = int(qc["rows_below_minimum"]) + int(below_minimum.sum())
+            qc["rows_above_maximum"] = int(qc["rows_above_maximum"]) + int(above_maximum.sum())
+            for code, region_data in data.groupby("REG_CODE", sort=False):
+                region_qc = elevation_qc_by_region[str(code)]
+                region_qc["assigned_rows"] += len(region_data)
+                region_qc["below_min_rows"] += int(region_data["elev_median"].lt(elevation_min_m).sum())
+                region_qc["above_max_rows"] += int(region_data["elev_median"].gt(elevation_max_m).sum())
+                region_qc["retained_rows"] += int(keep.loc[region_data.index].sum())
+            data = data.loc[keep].copy()
+            qc["rows_retained"] = int(qc["rows_retained"]) + len(data)
+            if data.empty:
+                continue
             data = add_stable_sample_fields(data, seed=split_seed, train_fraction=train_fraction)
             data = data[_expected_columns()]
             audit["rows_assigned"] = int(audit["rows_assigned"]) + len(data)
@@ -381,6 +447,21 @@ def run(
 
     audit_path = root / "region_assignment_audit.json"
     audit_path.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
+    elevation_qc_audit_path = root / "elevation_qc_audit.json"
+    elevation_qc_audit_path.write_text(
+        json.dumps(audit["elevation_qc"], ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    elevation_qc_region_path = root / "elevation_qc_by_region.csv"
+    elevation_qc_region = pd.DataFrame(elevation_qc_by_region.values())
+    elevation_qc_region["removed_rows"] = (
+        elevation_qc_region["below_min_rows"] + elevation_qc_region["above_max_rows"]
+    )
+    elevation_qc_region["retained_fraction"] = np.where(
+        elevation_qc_region["assigned_rows"] > 0,
+        elevation_qc_region["retained_rows"] / elevation_qc_region["assigned_rows"],
+        np.nan,
+    )
+    elevation_qc_region.to_csv(elevation_qc_region_path, index=False, encoding="utf-8-sig")
     if int(audit["rows_unassigned"]) or int(audit["rows_multi_assigned"]):
         raise RuntimeError(
             "MEOW 区域归属审计未通过："
@@ -397,6 +478,8 @@ def run(
         "test_rows": int(manifest["test_rows"].sum()),
         "region_manifest": str((root / "region_manifest.csv").resolve()),
         "assignment_audit": str(audit_path.resolve()),
+        "elevation_qc_audit": str(elevation_qc_audit_path.resolve()),
+        "elevation_qc_by_region": str(elevation_qc_region_path.resolve()),
     }
     (root / "regional_training_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -404,6 +487,13 @@ def run(
     console.print(f"[green]区域样本准备完成：{root}[/green]")
     console.print(
         f"有效样本 {summary['valid_rows']:,}；train {summary['train_rows']:,}；test {summary['test_rows']:,}。"
+    )
+    qc = audit["elevation_qc"]
+    assert isinstance(qc, dict)
+    console.print(
+        "高程质控："
+        f"输入 {int(qc['rows_before_qc']):,}，低于下限 {int(qc['rows_below_minimum']):,}，"
+        f"高于上限 {int(qc['rows_above_maximum']):,}，保留 {int(qc['rows_retained']):,}。"
     )
     console.print(f"区域清单：{root / 'region_manifest.csv'}")
     return root

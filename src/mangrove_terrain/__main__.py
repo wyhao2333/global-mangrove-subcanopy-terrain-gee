@@ -11,6 +11,7 @@ from . import (
     check_staged_tasks,
     download_alpha_assets,
     ee_auth,
+    egm2008_conversion,
     export_alpha_assets_to_drive,
     export_native_tiles,
     export_samples,
@@ -143,6 +144,13 @@ def main() -> None:
     p_agg = sub.add_parser("aggregate", help="本地按 AlphaEarth 10 m 像元聚合 GEDI 高程")
     p_agg.add_argument("--input-dir", default=None, help="原始 CSV/Parquet 所在目录")
     p_agg.add_argument("--output", default=None, help="输出 parquet 路径")
+
+    p_egm2008 = sub.add_parser("convert-egm2008", help="将 GEDI 聚合高程从 WGS84 椭球高改正为 EGM2008 正高")
+    p_egm2008.add_argument("--input", default=None, help="输入聚合训练 Parquet 路径")
+    p_egm2008.add_argument("--output", default=None, help="输出 EGM2008 训练 Parquet 路径")
+    p_egm2008.add_argument("--grid", default=None, help="PROJ 可读取的 EGM2008 GeoTIFF 路径")
+    p_egm2008.add_argument("--analysis-dir", default=None, help="统计表、图件和候选异常点输出目录")
+    p_egm2008.add_argument("--overwrite", action="store_true", help="明确允许覆盖已有 EGM2008 输出 Parquet")
 
     p_r_check = sub.add_parser("check-r-environment", help="步骤6a：检查或安装 R/ranger 环境")
     p_r_check.add_argument("--interactive", action="store_true", help="找不到 R 时按中文提示下载安装")
@@ -299,6 +307,15 @@ def main() -> None:
             )
         elif args.command == "aggregate":
             aggregate_samples.run(cfg, input_dir=args.input_dir, output_path=args.output)
+        elif args.command == "convert-egm2008":
+            egm2008_conversion.run(
+                cfg,
+                input_path=args.input,
+                output_path=args.output,
+                grid_path=args.grid,
+                analysis_dir=args.analysis_dir,
+                overwrite=args.overwrite,
+            )
         elif args.command == "check-r-environment":
             r_environment.run(cfg, config_path=args.config, interactive=args.interactive)
         elif args.command == "prepare-regional-training":

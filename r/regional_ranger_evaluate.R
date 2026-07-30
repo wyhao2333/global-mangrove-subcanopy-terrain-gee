@@ -52,6 +52,31 @@ metric_row <- function(observed, predicted) {
              sum_abs_error=sum(abs(error)), sum_error=sum(error), sum_y=sum_y, sum_y2=sum_y2)
 }
 
+save_region_scatter <- function(preview, metric, code, output_path) {
+  limits <- range(c(preview$observed, preview$predicted), finite=TRUE)
+  span <- diff(limits)
+  if (!is.finite(span) || span <= 0) span <- max(abs(limits), 1)
+  padding <- span * 0.04
+  limits <- limits + c(-padding, padding)
+  label <- sprintf(
+    "完整 test30 指标\nn = %s\nR² = %.3f\nRMSE = %.3f m\nMAE = %.3f m\nBias = %.3f m",
+    format(metric$n, big.mark=",", trim=TRUE), metric$r2, metric$rmse, metric$mae, metric$bias
+  )
+  plot <- ggplot(preview, aes(observed, predicted)) +
+    geom_point(color="#0072B2", alpha=.18, size=.55) +
+    geom_abline(slope=1, intercept=0, color="#D55E00", linewidth=.65, linetype="dashed") +
+    annotate("label", x=limits[1] + diff(limits) * .035, y=limits[2] - diff(limits) * .035,
+             label=label, hjust=0, vjust=1, size=3.2, linewidth=.2) +
+    coord_equal(xlim=limits, ylim=limits, expand=FALSE) +
+    labs(
+      x="GEDI 聚合地形标签 EGM2008 正高 (m)",
+      y="本地 ranger 预测 EGM2008 正高 (m)",
+      title=paste0("MEOW-14 ", code, "：随机 test30 内部验证")
+    ) +
+    theme_bw(base_size=10)
+  ggsave(output_path, plot, width=7.2, height=6.2, dpi=240)
+}
+
 summary_rows <- list()
 preview_rows <- list()
 strata_rows <- list()
@@ -113,6 +138,11 @@ for (row_index in seq_len(nrow(manifest))) {
   preview_index <- preview_index + 1L
   region_dir <- file.path(output_dir, code)
   dir.create(region_dir, recursive=TRUE, showWarnings=FALSE)
+  region_preview <- data.table(
+    observed=observed[preview_ids], predicted=prediction[preview_ids], residual=error[preview_ids],
+    elev_count=test$elev_count[preview_ids], elev_iqr=test$elev_iqr[preview_ids]
+  )
+  save_region_scatter(region_preview, metric, code, file.path(region_dir, "observed_predicted_test30.png"))
   fwrite(metric, file.path(region_dir, "local_train70_test30_metrics.csv"))
   fwrite(data.table(residual_q001=quantile(error, .001), residual_q01=quantile(error, .01), residual_q05=quantile(error, .05),
                      residual_median=median(error), residual_q95=quantile(error, .95), residual_q99=quantile(error, .99), residual_q999=quantile(error, .999)),
@@ -141,7 +171,7 @@ preview <- rbindlist(preview_rows, fill=TRUE)
 fwrite(preview, file.path(output_dir, "regional_test_prediction_preview.csv"))
 scatter <- ggplot(preview, aes(observed, predicted)) + geom_bin2d(bins=65) +
   geom_abline(slope=1, intercept=0, color="white", linewidth=.35) + facet_wrap(~region_code, scales="free") +
-  scale_fill_viridis_c(name="样本数") + labs(x="GEDI 聚合 elev_median (m)", y="本地 ranger 预测 (m)", title="MEOW-14 随机 test30 内部验证") + theme_bw(base_size=10)
+  scale_fill_viridis_c(name="样本数") + labs(x="GEDI 聚合地形标签 EGM2008 正高 (m)", y="本地 ranger 预测 EGM2008 正高 (m)", title="MEOW-14 随机 test30 内部验证") + theme_bw(base_size=10)
 ggsave(file.path(output_dir, "figures", "regional_observed_predicted.png"), scatter, width=12, height=9, dpi=240)
 residual_plot <- ggplot(preview, aes(region_code, residual)) + geom_boxplot(outlier.size=.15) + geom_hline(yintercept=0, color="#d95f0e") +
   labs(x="MEOW-14 区域", y="预测残差 (m)", title="区域 test30 残差分布") + theme_bw(base_size=10)
