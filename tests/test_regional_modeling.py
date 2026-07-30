@@ -16,6 +16,7 @@ from mangrove_terrain.regional_gee_models import _classifier, _refresh_jobs
 from mangrove_terrain.r_environment import REQUIRED_PACKAGES
 from mangrove_terrain.regional_training import (
     RegionIndex,
+    _repair_region_geometries,
     add_stable_sample_fields,
     assign_region_codes,
     elevation_qc_mask,
@@ -35,6 +36,16 @@ def make_region_index(count: int = 14) -> RegionIndex:
 
 
 class RegionalTrainingTests(unittest.TestCase):
+    def test_self_intersection_repair_prefers_buffer_zero(self):
+        self_intersection = shapely.Polygon([(0, 0), (2, 2), (0, 2), (2, 0), (0, 0)])
+        geometry = np.asarray([self_intersection], dtype=object)
+        with patch("mangrove_terrain.regional_training.shapely.make_valid") as make_valid:
+            repaired, invalid, method = _repair_region_geometries(geometry)
+        self.assertTrue(bool(invalid[0]))
+        self.assertEqual(method, "buffer(0)")
+        self.assertTrue(bool(shapely.is_valid(repaired[0])))
+        make_valid.assert_not_called()
+
     def test_sync_config_migrates_old_global_rscript_to_regional_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.yaml"
@@ -55,8 +66,8 @@ class RegionalTrainingTests(unittest.TestCase):
                 loaded["regional_modeling"]["input_training_parquet"],
                 "data/mangrove_gedi_alphaearth_training_egm2008.parquet",
             )
-            self.assertEqual(loaded["regional_modeling"]["output_dir"], "outputs/training/meow14_egm2008_qc_v001")
-            self.assertEqual(loaded["regional_modeling"]["model_version"], "egm2008_qc_v001")
+            self.assertEqual(loaded["regional_modeling"]["output_dir"], "outputs/training/meow14_egm2008_baseqa_v002")
+            self.assertEqual(loaded["regional_modeling"]["model_version"], "egm2008_baseqa_v002")
 
     def test_assignment_reports_unassigned_and_overlapping_points(self):
         polygons = np.asarray([shapely.box(0, 0, 2, 2), shapely.box(1, 0, 3, 2)])

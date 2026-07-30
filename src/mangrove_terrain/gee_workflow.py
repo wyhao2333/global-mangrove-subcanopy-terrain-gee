@@ -9,6 +9,17 @@ import ee
 
 ALPHA_BANDS = [f"A{i:02d}" for i in range(64)]
 GEDI_FIELDS = ["elev_lowestmode", "quality_flag", "degrade_flag"]
+GEDI_QC_OPTIONAL_FIELDS = [
+    "sensitivity",
+    "elev_sensitivity",
+    "surface_flag",
+    "num_detectedmodes",
+    "beam",
+    "solar_elevation",
+    "elev_lowestreturn",
+    "elev_highestreturn",
+    "elev_stddev",
+]
 
 
 def load_shard_as_region(path: Path) -> ee.Geometry:
@@ -96,6 +107,79 @@ def quality_masked_gedi_points(
         )
 
     return sampled.map(add_props)
+
+
+def gedi_quality_field_names(available_bands: list[str]) -> list[str]:
+    """返回当前 GEDI 月度产品中确实存在的 pilot 质量字段。
+
+    GEE 资产版本可能调整 band 名；因此只在运行时确认过存在的字段才会请求，
+    避免把某个未验证的产品字段硬编码成全球筛选规则。
+    """
+    available = set(available_bands)
+    required = [name for name in GEDI_FIELDS if name in available]
+    if set(GEDI_FIELDS) - set(required):
+        raise ValueError(f"GEDI 月度集合缺少基础字段: {sorted(set(GEDI_FIELDS) - set(required))}")
+    return required + [name for name in GEDI_QC_OPTIONAL_FIELDS if name in available]
+
+
+def build_gedi_quality_pilot_collection(
+    region: ee.Geometry,
+    region_code: str,
+    h3_cell: str,
+    gedi_id: str,
+    gmw_id: str,
+    gmw_image_index: str,
+    start_date: str,
+    end_date: str,
+    quality_fields: list[str],
+    tile_scale: int,
+) -> ee.FeatureCollection:
+    """只导出 GEDI 原始质量字段的 H3 小样本，不触发 AlphaEarth 计算。"""
+    gmw_mask = gmw_mask_image(gmw_id, gmw_image_index)
+    collection = ee.ImageCollection(gedi_id).filterDate(start_date, end_date).filterBounds(region)
+    count = collection.size()
+    images = collection.toList(count)
+
+    def one_image(index: ee.Number) -> ee.FeatureCollection:
+        image = ee.Image(images.get(index))
+        quality_mask = (
+            image.select("quality_flag")
+            .eq(1)
+            .And(image.select("degrade_flag").eq(0))
+            .And(image.select("elev_lowestmode").mask())
+        )
+        sampled = (
+            image.select(quality_fields)
+            .updateMask(quality_mask)
+            .updateMask(gmw_mask)
+            .sample(
+                region=region,
+                scale=25,
+                projection=image.select("elev_lowestmode").projection(),
+                geometries=True,
+                tileScale=tile_scale,
+            )
+        )
+        date = ee.Date(image.get("system:time_start"))
+        image_id = ee.String(image.get("system:index"))
+
+        def add_props(feature: ee.Feature) -> ee.Feature:
+            coordinates = feature.geometry().coordinates()
+            return feature.set(
+                {
+                    "REG_CODE": region_code,
+                    "h3_cell": h3_cell,
+                    "lon": coordinates.get(0),
+                    "lat": coordinates.get(1),
+                    "year": date.get("year"),
+                    "month": date.get("month"),
+                    "gedi_image_id": image_id,
+                }
+            )
+
+        return sampled.map(add_props)
+
+    return ee.FeatureCollection(ee.List.sequence(0, count.subtract(1)).map(one_image)).flatten()
 
 
 def build_sample_collection(
