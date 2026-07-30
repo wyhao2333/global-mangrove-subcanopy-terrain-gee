@@ -14,7 +14,7 @@ from .config import project_root
 
 
 console = Console()
-REQUIRED_PACKAGES = ("ranger", "data.table", "ggplot2")
+REQUIRED_PACKAGES = ("ranger", "data.table", "ggplot2", "MASS")
 CRAN_WINDOWS_BASE = "https://cran.r-project.org/bin/windows/base/"
 
 
@@ -119,7 +119,7 @@ def run(cfg: dict, *, config_path: str | Path = "config.yaml", interactive: bool
         rscript = _install_r_interactively()
     console.print(f"检测到 Rscript：{rscript}")
     subprocess.run([str(rscript), "--version"], check=True)
-    console.print("正在检查并安装所需 R 包：ranger、data.table、ggplot2。")
+    console.print("正在检查并安装所需 R 包：ranger、data.table、ggplot2、MASS。")
     _install_packages(rscript)
     _save_rscript_path(config_path, rscript)
     console.print(f"[green]R 环境可用，路径已保存到 config.yaml：{rscript}[/green]")

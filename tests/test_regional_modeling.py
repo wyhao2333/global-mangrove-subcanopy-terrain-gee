@@ -13,6 +13,7 @@ from shapely.strtree import STRtree
 from mangrove_terrain.config import sync_config
 from mangrove_terrain.gee_workflow import ALPHA_BANDS
 from mangrove_terrain.regional_gee_models import _classifier, _refresh_jobs
+from mangrove_terrain.r_environment import REQUIRED_PACKAGES
 from mangrove_terrain.regional_training import (
     RegionIndex,
     add_stable_sample_fields,
@@ -220,6 +221,17 @@ class RegionalGeeTests(unittest.TestCase):
             with patch("mangrove_terrain.regional_gee_models._task_statuses", return_value={"t1": {"id": "t1", "state": "COMPLETED"}}):
                 result = _refresh_jobs(jobs)
         self.assertEqual(result.loc[0, "status"], "needs_manual_retry")
+
+
+class RegionalEvaluationFigureTests(unittest.TestCase):
+    def test_density_scatter_dependencies_and_rendering_steps_are_declared(self):
+        script = (Path(__file__).resolve().parents[1] / "r" / "regional_ranger_evaluate.R").read_text(encoding="utf-8")
+        self.assertIn("MASS", REQUIRED_PACKAGES)
+        self.assertIn("MASS::kde2d", script)
+        self.assertIn("scale_color_viridis_c", script)
+        self.assertIn("geom_abline(slope=1", script)
+        self.assertIn("geom_abline(slope=slope", script)
+        self.assertIn("完整 test30 指标", script)
 
 
 if __name__ == "__main__":

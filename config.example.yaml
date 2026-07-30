@@ -90,7 +90,8 @@ regional_modeling:
   input_training_parquet: data/mangrove_gedi_alphaearth_training_egm2008.parquet
   # 新版本结果与旧椭球高训练结果分开存放，避免相互覆盖或混用。
   output_dir: outputs/training/meow14_egm2008_qc_v001
-  # 保守的标签完整性筛选，不是红树林的生物学绝对高程分布范围；边界值会保留。
+  # 保守的标签完整性筛选，不是红树林的生物学绝对高程分布范围；
+  # 数值依据、适用边界和推荐引用见 docs/EGM2008_ELEVATION_QC_RATIONALE.md；边界值会保留。
   elevation_qc_enabled: true
   elevation_min_m: -20.0
   elevation_max_m: 50.0

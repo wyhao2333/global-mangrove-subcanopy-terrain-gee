@@ -17,7 +17,7 @@ prediction_batch_rows <- as.integer(arg_value("--prediction-batch-rows", "100000
 save_models <- tolower(arg_value("--save-models", "false")) == "true"
 if (is.null(manifest_path) || is.null(tuning_dir) || is.null(output_dir)) stop("必须提供 --manifest、--tuning-dir 和 --output-dir。")
 
-required_packages <- c("ranger", "data.table", "ggplot2")
+required_packages <- c("ranger", "data.table", "ggplot2", "MASS")
 missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing_packages) > 0) stop(paste("缺少 R 包：", paste(missing_packages, collapse = ", ")))
 library(ranger)
@@ -52,6 +52,18 @@ metric_row <- function(observed, predicted) {
              sum_abs_error=sum(abs(error)), sum_error=sum(error), sum_y=sum_y, sum_y2=sum_y2)
 }
 
+# 对图中的固定预览点计算二维核密度。指标始终由完整 test30 计算，
+# 这里的密度只用于让散点图在高重叠区保持可读。
+estimate_point_density <- function(observed, predicted, limits) {
+  if (length(observed) < 3L || diff(limits) <= 0) return(rep(0, length(observed)))
+  density_grid <- MASS::kde2d(observed, predicted, n=200L, lims=c(limits, limits))
+  x_index <- findInterval(observed, density_grid$x, all.inside=TRUE)
+  y_index <- findInterval(predicted, density_grid$y, all.inside=TRUE)
+  density <- density_grid$z[cbind(y_index, x_index)]
+  if (!all(is.finite(density))) return(rep(0, length(observed)))
+  pmax(density, 0)
+}
+
 save_region_scatter <- function(preview, metric, code, output_path) {
   limits <- range(c(preview$observed, preview$predicted), finite=TRUE)
   span <- diff(limits)
@@ -59,21 +71,32 @@ save_region_scatter <- function(preview, metric, code, output_path) {
   padding <- span * 0.04
   limits <- limits + c(-padding, padding)
   label <- sprintf(
-    "完整 test30 指标\nn = %s\nR² = %.3f\nRMSE = %.3f m\nMAE = %.3f m\nBias = %.3f m",
+    "完整 test30 指标\nN = %s\nR² = %.3f\nRMSE = %.3f m\nMAE = %.3f m\nBias = %.3f m（预测-观测）",
     format(metric$n, big.mark=",", trim=TRUE), metric$r2, metric$rmse, metric$mae, metric$bias
   )
-  plot <- ggplot(preview, aes(observed, predicted)) +
-    geom_point(color="#0072B2", alpha=.18, size=.55) +
-    geom_abline(slope=1, intercept=0, color="#D55E00", linewidth=.65, linetype="dashed") +
+  point_data <- copy(preview)
+  point_data[, density := estimate_point_density(observed, predicted, limits)]
+  regression <- lm(predicted ~ observed, data=point_data)
+  slope <- unname(coef(regression)[["observed"]])
+  intercept <- unname(coef(regression)[["(Intercept)"]])
+  regression_label <- sprintf("y = %.2fx %+.2f", slope, intercept)
+  plot <- ggplot(point_data, aes(observed, predicted)) +
+    geom_point(aes(color=density), alpha=.88, size=.78) +
+    scale_color_viridis_c(name="二维核密度", option="turbo", trans="sqrt") +
+    geom_abline(slope=1, intercept=0, color="black", linewidth=.65, linetype="dashed") +
+    geom_abline(slope=slope, intercept=intercept, color="#C63D2F", linewidth=.78) +
     annotate("label", x=limits[1] + diff(limits) * .035, y=limits[2] - diff(limits) * .035,
              label=label, hjust=0, vjust=1, size=3.2, linewidth=.2) +
     coord_equal(xlim=limits, ylim=limits, expand=FALSE) +
     labs(
       x="GEDI 聚合地形标签 EGM2008 正高 (m)",
       y="本地 ranger 预测 EGM2008 正高 (m)",
-      title=paste0("MEOW-14 ", code, "：随机 test30 内部验证")
+      title=paste0("MEOW-14 ", code, "：随机 test30 内部验证"),
+      caption=paste0("黑色虚线：1:1 线；红线：线性回归 ", regression_label,
+                     "；颜色：固定预览样本的二维核密度")
     ) +
-    theme_bw(base_size=10)
+    theme_bw(base_size=10) +
+    theme(panel.grid=element_blank(), plot.caption=element_text(hjust=0, margin=margin(t=7)))
   ggsave(output_path, plot, width=7.2, height=6.2, dpi=240)
 }
 

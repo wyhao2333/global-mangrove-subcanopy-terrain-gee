@@ -585,7 +585,7 @@ outputs/analysis/egm2008_elevation_diagnostics/
 
 #### 14.1 先检查 R：双击 `run_06a_check_r.bat`
 
-检查 `Rscript.exe`、`ranger`、`data.table` 和 `ggplot2`。未检测到 R 时会显示 CRAN 下载地址和建议安装目录；直接回车确认、输入新目录修改，或输入 `N` 取消。成功后实际 R 路径会保存到 `config.yaml` 的 `regional_modeling.rscript_path`。
+检查 `Rscript.exe`、`ranger`、`data.table`、`ggplot2` 和 `MASS`。未检测到 R 时会显示 CRAN 下载地址和建议安装目录；直接回车确认、输入新目录修改，或输入 `N` 取消。成功后实际 R 路径会保存到 `config.yaml` 的 `regional_modeling.rscript_path`。
 
 #### 14.2 准备区域样本：双击 `run_06b_prepare_meow14_training.bat`
 
@@ -607,7 +607,15 @@ regional_modeling:
 
 程序用 `pyogrio + shapely + pyarrow` 分批读取 Parquet，严格要求每个像元只命中一个区域；任意未归属或多重归属都会终止，不会悄悄分配。随后才对 EGM2008 `elev_median` 做闭区间 `[-20, 50] m` 标签完整性筛选，再按 `ae_x + ae_y + seed=42` 的稳定哈希随机划分约70% `train` 和30% `test`，同一10 m像元不会进入两个集合。
 
-该筛选不是“红树林只能处于 -20 至 50 m”的生态学断言。红树林处于潮间带、通常低平（Fatoyinbo et al., 2008, DOI: `10.1029/2007JG000551`; Wang et al., 2026, DOI: `10.5194/essd-2026-356`），但全球没有统一的生物学绝对高程界限；孙德尔本的局地平均约为 2 m MSL（Payo et al., 2016, DOI: `10.1007/s10584-016-1769-z`）。因此该保守范围仅剔除疑似非地面/错误最低模式标签。EGM2008 正高也不等同于局地平均海平面或潮位基准。
+#### 默认 `[-20, 50] m` 的依据、引用与边界
+
+这不是“全球红树林只能处于 -20 至 50 m”的生态学断言，而是一个宽容的 **GEDI 标签完整性筛选**。红树林的建立和海平面响应受潮汐淹水、相对高程和水文控制，通常处于低平潮间带环境（Krauss et al., 2008, DOI: `10.1016/j.aquabot.2007.12.014`; Lovelock et al., 2015, DOI: `10.1038/nature15538`）。但没有文献能为全球所有潮差、河口和垂直基准直接规定统一的绝对高程上下限。EGM2008 正高也不等同于地方平均海平面或任何潮位基准。
+
+本项目的 EGM2008 诊断表有 `7,010,871` 个聚合像元，中位数为 `2.80 m`、99.9% 分位数为 `29.59 m`。`< -20 m` 有 `5,358` 条，`> 50 m` 有 `2,232` 条，合计仅 `7,590` 条（`0.108%`）；边界值本身保留。因此，`50 m` 比本样本的 99.9% 分位数高约 20 m，`-20 m` 也向海平面以下保留了 20 m 的容差。这个双侧规则只隔离极端尾部，避免疑似错误最低模式、残余冠层/水面回波或局地垂直不一致进入模型，并不紧密裁剪主体地形分布。
+
+红树林林下激光地面点不应只凭高度被认定为可靠：Wang et al. (2026, DOI: `10.5194/essd-2026-356`) 和 Huang et al. (2024, DOI: `10.3390/f15122064`) 都采用信号、几何、云/噪声和空间一致性等多重约束。项目先执行 GEDI `quality_flag == 1`、`degrade_flag == 0` 和有效高程筛选；此范围只是其后的最后一道标签审计。完整决策链、推荐引用、可直接用于方法部分的表述和审稿边界见 [EGM2008 高程标签质控依据与引用说明](docs/EGM2008_ELEVATION_QC_RATIONALE.md)。
+
+如需改变范围，修改 `config.yaml` 的 `regional_modeling.elevation_min_m`、`elevation_max_m` 与 `model_version`，并**完整重跑步骤6b、6c、6d**；不同范围的训练/测试集、调参结果和精度指标不能混用。
 
 完成后会生成：
 
@@ -621,7 +629,7 @@ outputs/training/meow14_egm2008_qc_v001/regions/<REG_CODE>/<REG_CODE>_train70.cs
 outputs/training/meow14_egm2008_qc_v001/regions/<REG_CODE>/<REG_CODE>_test30.csv
 ```
 
-`elevation_qc_audit.json` 记录全局输入数、低于下限数、高于上限数和保留数；`elevation_qc_by_region.csv` 记录相同的逐区统计。`region_manifest.csv` 是后续 R 与 GEE 的唯一文件清单。它应有14行，分别为 `AFW, AFE, RSG, IND, EAS, SEW, SEE, OCN, AUS, PAC, AMW, GMX, CAR, AME`。
+`elevation_qc_audit.json` 记录全局输入数、低于下限数、高于上限数和保留数；`elevation_qc_by_region.csv` 记录相同的逐区统计。请在每次更改阈值后保留这两份文件，用于报告实际剔除比例和空间分布。`region_manifest.csv` 是后续 R 与 GEE 的唯一文件清单。它应有14行，分别为 `AFW, AFE, RSG, IND, EAS, SEW, SEE, OCN, AUS, PAC, AMW, GMX, CAR, AME`。
 
 #### 14.3 逐区调参：双击 `run_06c_tune_meow14_ranger.bat`
 
@@ -637,7 +645,9 @@ outputs/training/meow14_egm2008_qc_v001/ranger_tuning/regional_tuning_summary.cs
 
 #### 14.4 本地最终模型与精度：双击 `run_06d_evaluate_meow14_ranger.bat`
 
-每区按自己的最优参数，用完整 `train70` 拟合一个本地 `ranger` 模型，再分批预测完整锁定 `test30`。输出各区以及全部区域的加权指标与宏平均指标：`RMSE`、`MAE`、`Bias`、`R2`、残差分位数，并按 `elev_count` 与 `elev_iqr` 生成标签稳定性诊断。每区另输出一张观测-预测散点图：图形以固定种子从该区 `test30` 抽取最多10,000点，含 1:1 线、等比例坐标轴；图内的 `n`、`R2`、`RMSE`、`MAE`、`Bias` 始终使用完整 `test30` 计算，`Bias = 预测值 - 观测值`。
+每区按自己的最优参数，用完整 `train70` 拟合一个本地 `ranger` 模型，再分批预测完整锁定 `test30`。输出各区以及全部区域的加权指标与宏平均指标：`RMSE`、`MAE`、`Bias`、`R2`、残差分位数，并按 `elev_count` 与 `elev_iqr` 生成标签稳定性诊断。
+
+每区另输出一张观测-预测**二维核密度散点图**。图形以固定种子从该区 `test30` 抽取最多10,000点：每个点的颜色是该预览样本内的二维高斯核密度，而不是原始 GEDI 观测次数；颜色条显示核密度。图中黑色虚线为 1:1 线，红线为预览样本的普通最小二乘回归线及方程，坐标轴同范围且等比例。图内 `N`、`R2`、`RMSE`、`MAE`、`Bias` 始终由完整 `test30` 计算，**不**由最多10,000个作图点计算；`Bias = 预测值 - 观测值`。回归线和核密度仅用于解释图形，不替代完整测试集指标。
 
 ```text
 outputs/training/meow14_egm2008_qc_v001/ranger_evaluation/regional_evaluation_summary.csv
