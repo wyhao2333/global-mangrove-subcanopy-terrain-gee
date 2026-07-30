@@ -59,13 +59,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "alpha_min_chunk_degrees": 0.0625,
     },
     "aggregation": {"min_elev_count": 1, "preview_csv_rows": 10000},
+    "vertical_datum": {
+        "input_parquet": "data/mangrove_gedi_alphaearth_training.parquet",
+        "output_parquet": "data/mangrove_gedi_alphaearth_training_egm2008.parquet",
+        "egm2008_grid": "F:/VDatum/us_nga_egm08_25.tif",
+        "analysis_dir": "outputs/analysis/egm2008_elevation_diagnostics",
+        "batch_rows": 100000,
+        "candidate_low_m": -20.0,
+        "candidate_high_m": 50.0,
+    },
     "regional_modeling": {
         # 14 个项目建模区由 MEOW 232 个原始生态区归并而来；原始矢量不随代码仓库提交。
         "region_shp": "区域划分结果/coastal_belt_irregular_mangrove_regions_shapefile/coastal_belt_irregular_mangrove_regions.shp",
         "region_code_field": "REG_CODE",
         "region_name_field": "REGION",
-        "input_training_parquet": "data/mangrove_gedi_alphaearth_training.parquet",
-        "output_dir": "outputs/training/meow14",
+        # 步骤 5b 生成的 EGM2008 正高训练表；原始椭球高表仅保留为上游输入。
+        "input_training_parquet": "data/mangrove_gedi_alphaearth_training_egm2008.parquet",
+        # 使用独立目录和版本，避免与旧的椭球高训练结果混用。
+        "output_dir": "outputs/training/meow14_egm2008_qc_v001",
+        # 该范围是保守的标签完整性筛选，不是红树林的生物学绝对高程范围。
+        "elevation_qc_enabled": True,
+        "elevation_min_m": -20.0,
+        "elevation_max_m": 50.0,
         "rscript_path": "",
         "split_seed": 42,
         "train_fraction": 0.70,
@@ -79,7 +94,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "assignment_grid_degrees": 0.1,
         "prediction_batch_rows": 100000,
         "save_local_models": False,
-        "model_version": "v001",
+        "model_version": "egm2008_qc_v001",
         "gee_training_asset_root": "projects/{project}/assets/global_mangrove_subcanopy_terrain/training/meow14_{model_version}",
         "gee_model_asset_root": "projects/{project}/assets/global_mangrove_subcanopy_terrain/models/meow14_{model_version}",
         "gee_max_concurrent_tasks": 3,
@@ -121,11 +136,23 @@ def sync_config(config_path: str | Path | None = None) -> Path:
         with path.open("r", encoding="utf-8") as f:
             existing = yaml.safe_load(f) or {}
     legacy_modeling = existing.pop("modeling", None)
+    regional = existing.setdefault("regional_modeling", {})
+    if not isinstance(regional, dict):
+        raise ValueError("regional_modeling 必须是 YAML 对象。")
     if isinstance(legacy_modeling, dict):
         legacy_rscript = str(legacy_modeling.get("rscript_path", "")).strip()
-        regional = existing.setdefault("regional_modeling", {})
         if legacy_rscript and not str(regional.get("rscript_path", "")).strip():
             regional["rscript_path"] = legacy_rscript
+
+    # 只迁移项目历史版本写入的默认值；用户自定义的路径、目录和版本号保持不变。
+    legacy_defaults = {
+        "input_training_parquet": "data/mangrove_gedi_alphaearth_training.parquet",
+        "output_dir": "outputs/training/meow14",
+        "model_version": "v001",
+    }
+    for key, legacy_value in legacy_defaults.items():
+        if regional.get(key) == legacy_value:
+            regional[key] = deepcopy(DEFAULT_CONFIG["regional_modeling"][key])
     merged = deepcopy(DEFAULT_CONFIG)
     _deep_update(merged, existing)
     path.parent.mkdir(parents=True, exist_ok=True)

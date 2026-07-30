@@ -68,15 +68,32 @@ aggregation:
   min_elev_count: 1
   preview_csv_rows: 10000
 
+# 步骤5b：GEDI 聚合标签由 WGS84 椭球高改正为 EGM2008 正高。
+# 输入文件不会被修改；输出文件的 elev_median 为 EGM2008 正高，原值保留为 elev_median_wgs84。
+vertical_datum:
+  input_parquet: data/mangrove_gedi_alphaearth_training.parquet
+  output_parquet: data/mangrove_gedi_alphaearth_training_egm2008.parquet
+  egm2008_grid: F:/VDatum/us_nga_egm08_25.tif
+  analysis_dir: outputs/analysis/egm2008_elevation_diagnostics
+  batch_rows: 100000
+  # 下列数值仅用于生成候选异常点审查表，不会删除任何训练样本。
+  candidate_low_m: -20.0
+  candidate_high_m: 50.0
+
 # 推荐的 MEOW-14 分区建模流程。区域 Shapefile 不随公开仓库提交，
 # 请从本项目“区域划分结果”文件夹复制到下列默认位置，或改为自己的绝对路径。
 regional_modeling:
   region_shp: 区域划分结果/coastal_belt_irregular_mangrove_regions_shapefile/coastal_belt_irregular_mangrove_regions.shp
   region_code_field: REG_CODE
   region_name_field: REGION
-  # 正式输入是步骤 5 的完整 Parquet；如实际文件在 outputs/training，请修改此项。
-  input_training_parquet: data/mangrove_gedi_alphaearth_training.parquet
-  output_dir: outputs/training/meow14
+  # 正式输入是步骤 5b 生成的 EGM2008 正高 Parquet；原始椭球高表不参与新一轮建模。
+  input_training_parquet: data/mangrove_gedi_alphaearth_training_egm2008.parquet
+  # 新版本结果与旧椭球高训练结果分开存放，避免相互覆盖或混用。
+  output_dir: outputs/training/meow14_egm2008_qc_v001
+  # 保守的标签完整性筛选，不是红树林的生物学绝对高程分布范围；边界值会保留。
+  elevation_qc_enabled: true
+  elevation_min_m: -20.0
+  elevation_max_m: 50.0
   # 步骤6a检测或安装后自动写入实际 Rscript.exe 路径。
   rscript_path: ""
   split_seed: 42
@@ -91,7 +108,7 @@ regional_modeling:
   assignment_grid_degrees: 0.1
   prediction_batch_rows: 100000
   save_local_models: false
-  model_version: v001
+  model_version: egm2008_qc_v001
   # 上传后的 14 个 TABLE Assets 应命名为 AFW_train70、AFE_train70 ... AME_train70。
   gee_training_asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain/training/meow14_{model_version}
   gee_model_asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain/models/meow14_{model_version}

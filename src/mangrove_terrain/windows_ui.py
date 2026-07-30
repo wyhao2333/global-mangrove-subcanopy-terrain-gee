@@ -18,10 +18,11 @@ GUIDES = {
     "stage2_drive": ("步骤4c：导出表资产到 Google Drive", "仅导出已验证存在的 AlphaEarth 表资产，供后续下载和本地聚合。"),
     "stage2_local_download": ("步骤4c：直接下载 AlphaEarth 表资产", "读取步骤4b已经完成的 AlphaEarth 输出目录，直接下载 CSV 到 outputs/raw_samples，不会创建 Drive 或 GEE 导出任务。"),
     "aggregate": ("步骤5：本地中值聚合", "将读取 outputs/raw_samples 中下载的CSV或Parquet，并生成训练表。"),
+    "egm2008": ("步骤5b：统一 GEDI 高程基准到 EGM2008", "将读取完整聚合训练 Parquet，保留原始 WGS84 椭球高并生成新的 EGM2008 训练表、分布统计和异常候选点审查图。不会删除样本、不会修改原始文件，也不会启动 R 或 GEE 任务。默认需要约 5 GB 可用磁盘空间。"),
     "r_check": ("步骤6a：检查 R/ranger 环境", "未找到 R 时会提示从 CRAN 下载，并允许确认或修改安装目录。"),
-    "regional_prepare": ("MEOW-14 步骤6b：准备区域训练样本", "将读取聚合 Parquet，严格核验每个像元只归属一个区域，再为每区生成固定随机70/30划分。完成后会产生14个训练 CSV，供 R 和 GEE 使用。"),
+    "regional_prepare": ("MEOW-14 步骤6b：准备区域训练样本", "将读取 EGM2008 聚合 Parquet，严格核验每个像元只归属一个区域；随后按配置的闭区间 [-20, 50] m 做标签完整性筛选，再为每区生成固定随机70/30划分和全局、逐区质控审计。"),
     "regional_tune": ("MEOW-14 步骤6c：逐区 ranger 调参", "每区仅使用 train70，进行5次独立10%无放回抽样和24组参数的 OOB 比较。运行时间较长，可按 Ctrl+C 停止后重新运行。"),
-    "regional_evaluate": ("MEOW-14 步骤6d：本地最终模型与测试精度", "每区以完整 train70 拟合，并只在固定 test30 上报告 RMSE、MAE、Bias 和 R2。这是 GEDI 标签的随机内部验证，不是 LiDAR/RTK 外部精度。"),
+    "regional_evaluate": ("MEOW-14 步骤6d：本地最终模型与测试精度", "每区以完整 train70 拟合，并只在固定 test30 上报告 RMSE、MAE、Bias 和 R2；每区另生成含完整测试集指标和1:1线的散点图。这是 GEDI 标签的随机内部验证，不是 LiDAR/RTK 外部精度。"),
     "regional_gee_check": ("MEOW-14 步骤6e：检查 GEE 区域训练表", "请先在 Earth Engine 网页上传14个 *_train70.csv。程序会逐一核对 TABLE 类型、必需字段和有效训练样本数。"),
     "regional_gee_models": ("MEOW-14 步骤6f：提交 GEE 区域模型", "先选择 EAS 小区 smoke test，再选择 AME 最大区压力测试；二者完成后再启动全部14区调度。调度器始终最多保留3个总活跃任务。"),
 }

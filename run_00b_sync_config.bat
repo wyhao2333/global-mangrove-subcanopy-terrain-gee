@@ -3,7 +3,7 @@ setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
 if not exist ".venv\Scripts\python.exe" (
-  echo Please run setup_windows.bat first.
+  echo 未找到项目环境。请先双击运行 setup_windows.bat。
   pause
   exit /b 1
 )
