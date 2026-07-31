@@ -66,8 +66,17 @@ class RegionalTrainingTests(unittest.TestCase):
                 loaded["regional_modeling"]["input_training_parquet"],
                 "data/mangrove_gedi_alphaearth_training_egm2008.parquet",
             )
-            self.assertEqual(loaded["regional_modeling"]["output_dir"], "outputs/training/meow14_egm2008_baseqa_v002")
-            self.assertEqual(loaded["regional_modeling"]["model_version"], "egm2008_baseqa_v002")
+            self.assertEqual(loaded["regional_modeling"]["output_dir"], "outputs/training/meow14_egm2008_range20_50_v003")
+            self.assertEqual(loaded["regional_modeling"]["model_version"], "egm2008_range20_50_v003")
+            self.assertTrue(loaded["regional_modeling"]["elevation_qc_enabled"])
+
+    def test_sync_config_preserves_user_selected_elevation_qc_switch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.yaml"
+            path.write_text("regional_modeling:\n  elevation_qc_enabled: false\n", encoding="utf-8")
+            sync_config(path)
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+            self.assertFalse(loaded["regional_modeling"]["elevation_qc_enabled"])
 
     def test_assignment_reports_unassigned_and_overlapping_points(self):
         polygons = np.asarray([shapely.box(0, 0, 2, 2), shapely.box(1, 0, 3, 2)])
@@ -243,6 +252,19 @@ class RegionalEvaluationFigureTests(unittest.TestCase):
         self.assertIn("geom_abline(slope=1", script)
         self.assertIn("geom_abline(slope=slope", script)
         self.assertIn("完整 test30 指标", script)
+
+
+class WindowsBatchTests(unittest.TestCase):
+    def test_egm2008_batch_keeps_window_open_for_all_exit_paths(self):
+        batch = (Path(__file__).resolve().parents[1] / "run_05b_convert_egm2008.bat").read_text(encoding="utf-8")
+        self.assertTrue(batch.isascii())
+        self.assertIn("setlocal EnableExtensions", batch)
+        self.assertIn('call ".venv\\Scripts\\python.exe" -m mangrove_terrain windows-guide egm2008 --confirm', batch)
+        self.assertIn('if "%GUIDE_EXIT%"=="2" goto cancelled', batch)
+        self.assertIn(":failed", batch)
+        self.assertIn("pause", batch)
+        self.assertIn("exit /b %RUN_EXIT%", batch)
+        self.assertNotIn("if errorlevel 2 goto done", batch)
 
 
 if __name__ == "__main__":

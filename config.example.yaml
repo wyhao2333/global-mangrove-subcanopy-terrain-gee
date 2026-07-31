@@ -115,10 +115,10 @@ regional_modeling:
   region_name_field: REGION
   # 正式输入是步骤 5b 生成的 EGM2008 正高 Parquet；原始椭球高表不参与新一轮建模。
   input_training_parquet: data/mangrove_gedi_alphaearth_training_egm2008.parquet
-  # 新版本结果与旧椭球高训练结果分开存放，避免相互覆盖或混用。
-  output_dir: outputs/training/meow14_egm2008_baseqa_v002
-  # 绝对高程范围尚在 sample_qc_experiment 中做敏感性对照，生产流程默认不删样本。
-  elevation_qc_enabled: false
+  # 本次 [-20, 50] m 测试结果单独保存，避免与未筛选的 baseqa_v002 结果混用。
+  output_dir: outputs/training/meow14_egm2008_range20_50_v003
+  # 默认按闭区间 [-20, 50] m 筛除明显异常标签；这是标签完整性质控，不是生态绝对范围。
+  elevation_qc_enabled: true
   elevation_min_m: -20.0
   elevation_max_m: 50.0
   # 步骤6a检测或安装后自动写入实际 Rscript.exe 路径。
@@ -135,7 +135,7 @@ regional_modeling:
   assignment_grid_degrees: 0.1
   prediction_batch_rows: 100000
   save_local_models: false
-  model_version: egm2008_baseqa_v002
+  model_version: egm2008_range20_50_v003
   # 上传后的 14 个 TABLE Assets 应命名为 AFW_train70、AFE_train70 ... AME_train70。
   gee_training_asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain/training/meow14_{model_version}
   gee_model_asset_root: projects/{project}/assets/global_mangrove_subcanopy_terrain/models/meow14_{model_version}
