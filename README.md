@@ -562,7 +562,7 @@ data/mangrove_gedi_alphaearth_training.parquet
 F:\VDatum\us_nga_egm08_25.tif
 ```
 
-双击后会先显示用途。输入 `Y` 才会开始；直接回车则取消。程序不会修改原始 Parquet，不会删除任何样本，也不会启动 R、GEE 或模型训练。
+双击后会先显示用途。输入 `Y` 才会开始；直接回车则取消。程序不会修改原始 Parquet，不会删除任何样本，也不会启动 R、GEE 或模型训练。无论成功、取消、输入文件缺失或程序报错，窗口都会停留并显示结果；不要通过双击后瞬间关闭的窗口判断运行状态。为避免 Windows `cmd.exe` 误解析 UTF-8 中文，`.bat` 启动器本身保持 ASCII；正常流程的中文说明与 Python 报错均由程序输出。
 
 默认输出：
 
@@ -579,9 +579,9 @@ outputs/analysis/egm2008_elevation_diagnostics/
 
 ### 15. 样本筛选试验：先比较，后决定
 
-本节不改变生产训练数据，也不宣称任何筛选规则已提高真实地形精度。因为当前没有独立 LiDAR/RTK，全部结果仅用于比较 GEDI 聚合标签的重复观测稳定性、局地空间一致性和对 AlphaEarth 特征的内部可预测性。
+本节不改写原始训练数据，也不宣称任何筛选规则已提高真实地形精度。因为当前没有独立 LiDAR/RTK，全部结果仅用于比较 GEDI 聚合标签的重复观测稳定性、局地空间一致性和对 AlphaEarth 特征的内部可预测性。
 
-`[-20, 50] m` 在这里是候选范围，而不是全球红树林的统一生态高程界限。红树林低平潮间带的生态背景可支持审查极端标签，但 EGM2008 正高不等同于局地潮位基准；不能用产品色标、极端样本比例或单篇局地研究确定全球硬阈值。完整依据、文献边界和规则定义见 [样本筛选试验说明](docs/SAMPLE_QC_EXPERIMENT.md)。
+`[-20, 50] m` 现在作为本项目**测试版生产流程的默认标签完整性质控**，以排除 EGM2008 改正后仍明显不可信的极端标签。它不是全球红树林的统一生态高程界限，也不能据此声称获得真实地形精度。红树林低平潮间带的生态背景支持审查极端标签，但 EGM2008 正高不等同于局地潮位基准；不能用产品色标、极端样本比例或单篇局地研究确定全球硬阈值。完整依据、文献边界和规则定义见 [样本筛选试验说明](docs/SAMPLE_QC_EXPERIMENT.md)。
 
 #### 15.1 双击 `run_05c_prepare_sample_qc.bat`
 
@@ -644,31 +644,31 @@ regional_modeling:
   region_shp: 区域划分结果/coastal_belt_irregular_mangrove_regions_shapefile/coastal_belt_irregular_mangrove_regions.shp
   # 步骤5b产生的完整 EGM2008 正高训练 Parquet。
   input_training_parquet: data/mangrove_gedi_alphaearth_training_egm2008.parquet
-  # base_qa 生产训练结果与历史 qc_v001 结果隔离保存。
-  output_dir: outputs/training/meow14_egm2008_baseqa_v002
-  # [-20, 50] m 仅在步骤15中作敏感性对照，默认不在生产流程删样本。
-  elevation_qc_enabled: false
+  # 结果与未筛选 baseqa_v002 以及历史 qc_v001 隔离保存。
+  output_dir: outputs/training/meow14_egm2008_range20_50_v003
+  # 默认按闭区间 [-20, 50] m 筛除明显异常标签；可设为 false 关闭。
+  elevation_qc_enabled: true
   elevation_min_m: -20.0
   elevation_max_m: 50.0
 ```
 
-程序用 `pyogrio + shapely + pyarrow` 分批读取 Parquet，严格要求每个像元只命中一个区域；任意未归属或多重归属都会终止，不会悄悄分配。随后按 `ae_x + ae_y + seed=42` 的稳定哈希划分约 70% `train` 和 30% `test`，同一 10 m 像元不会进入两个集合。默认不再按绝对高程范围删除 `base_qa` 样本；范围和多约束规则的比较必须通过步骤15完成，并在未来 LiDAR/RTK 外部验证后另行决定。
+程序用 `pyogrio + shapely + pyarrow` 分批读取 Parquet，严格要求每个像元只命中一个区域；任意未归属或多重归属都会终止，不会悄悄分配。随后在空间归属审计通过后，默认保留闭区间 `[-20, 50] m` 内的 EGM2008 标签，再按 `ae_x + ae_y + seed=42` 的稳定哈希划分约 70% `train` 和 30% `test`，同一 10 m 像元不会进入两个集合。范围开关与阈值均可在 `config.yaml` 修改；本次默认设置用于测试，后续仍应以 LiDAR/RTK 外部验证决定最终规则。
 
 提供的 MEOW-14 面含自相交环。程序优先以 Shapely/GEOS 的 `buffer(0)` 修复，再检查面有效性及任意两区的面积重叠；这是为了避免 `make_valid()` 在该文件中将 SEE 的连续覆盖范围意外拆出孔洞。修复区域和方法会写入区域归属审计。若仍发现未归属或多重归属，程序会停止并保留坐标示例供核查，绝不按最近区域自动分配。
 
 完成后会生成：
 
 ```text
-outputs/training/meow14_egm2008_baseqa_v002/region_assignment_audit.json
-outputs/training/meow14_egm2008_baseqa_v002/elevation_qc_audit.json
-outputs/training/meow14_egm2008_baseqa_v002/elevation_qc_by_region.csv
-outputs/training/meow14_egm2008_baseqa_v002/region_manifest.csv
-outputs/training/meow14_egm2008_baseqa_v002/regions/<REG_CODE>/<REG_CODE>_all_with_split.parquet
-outputs/training/meow14_egm2008_baseqa_v002/regions/<REG_CODE>/<REG_CODE>_train70.csv
-outputs/training/meow14_egm2008_baseqa_v002/regions/<REG_CODE>/<REG_CODE>_test30.csv
+outputs/training/meow14_egm2008_range20_50_v003/region_assignment_audit.json
+outputs/training/meow14_egm2008_range20_50_v003/elevation_qc_audit.json
+outputs/training/meow14_egm2008_range20_50_v003/elevation_qc_by_region.csv
+outputs/training/meow14_egm2008_range20_50_v003/region_manifest.csv
+outputs/training/meow14_egm2008_range20_50_v003/regions/<REG_CODE>/<REG_CODE>_all_with_split.parquet
+outputs/training/meow14_egm2008_range20_50_v003/regions/<REG_CODE>/<REG_CODE>_train70.csv
+outputs/training/meow14_egm2008_range20_50_v003/regions/<REG_CODE>/<REG_CODE>_test30.csv
 ```
 
-`elevation_qc_audit.json` 与 `elevation_qc_by_region.csv` 仍会记录本轮是否启用生产标签范围筛选；默认应显示未筛选。`region_manifest.csv` 是后续 R 与 GEE 的唯一文件清单。它应有14行，分别为 `AFW, AFE, RSG, IND, EAS, SEW, SEE, OCN, AUS, PAC, AMW, GMX, CAR, AME`。
+`elevation_qc_audit.json` 与 `elevation_qc_by_region.csv` 会记录本轮阈值、低于下限数、高于上限数、保留数和逐区留存率；默认应显示 `enabled: true` 和 `[-20, 50] m`。`region_manifest.csv` 是后续 R 与 GEE 的唯一文件清单。它应有14行，分别为 `AFW, AFE, RSG, IND, EAS, SEW, SEE, OCN, AUS, PAC, AMW, GMX, CAR, AME`。
 
 #### 16.3 逐区调参：双击 `run_06c_tune_meow14_ranger.bat`
 
@@ -677,9 +677,9 @@ outputs/training/meow14_egm2008_baseqa_v002/regions/<REG_CODE>/<REG_CODE>_test30
 结果写入：
 
 ```text
-outputs/training/meow14_egm2008_baseqa_v002/ranger_tuning/<REG_CODE>/ranger_oob_ranking.csv
-outputs/training/meow14_egm2008_baseqa_v002/ranger_tuning/<REG_CODE>/ranger_top10_mean_params_for_gee.csv
-outputs/training/meow14_egm2008_baseqa_v002/ranger_tuning/regional_tuning_summary.csv
+outputs/training/meow14_egm2008_range20_50_v003/ranger_tuning/<REG_CODE>/ranger_oob_ranking.csv
+outputs/training/meow14_egm2008_range20_50_v003/ranger_tuning/<REG_CODE>/ranger_top10_mean_params_for_gee.csv
+outputs/training/meow14_egm2008_range20_50_v003/ranger_tuning/regional_tuning_summary.csv
 ```
 
 #### 16.4 本地最终模型与精度：双击 `run_06d_evaluate_meow14_ranger.bat`
@@ -689,27 +689,27 @@ outputs/training/meow14_egm2008_baseqa_v002/ranger_tuning/regional_tuning_summar
 每区另输出一张观测-预测**二维核密度散点图**。图形以固定种子从该区 `test30` 抽取最多10,000点：每个点的颜色是该预览样本内的二维高斯核密度，而不是原始 GEDI 观测次数；颜色条显示核密度。图中黑色虚线为 1:1 线，红线为预览样本的普通最小二乘回归线及方程，坐标轴同范围且等比例。图内 `N`、`R2`、`RMSE`、`MAE`、`Bias` 始终由完整 `test30` 计算，**不**由最多10,000个作图点计算；`Bias = 预测值 - 观测值`。回归线和核密度仅用于解释图形，不替代完整测试集指标。
 
 ```text
-outputs/training/meow14_egm2008_baseqa_v002/ranger_evaluation/regional_evaluation_summary.csv
-outputs/training/meow14_egm2008_baseqa_v002/ranger_evaluation/regional_evaluation_overall_metrics.csv
-outputs/training/meow14_egm2008_baseqa_v002/ranger_evaluation/regional_test_diagnostics_by_label_stability.csv
-outputs/training/meow14_egm2008_baseqa_v002/ranger_evaluation/<REG_CODE>/observed_predicted_test30.png
-outputs/training/meow14_egm2008_baseqa_v002/ranger_evaluation/figures/
+outputs/training/meow14_egm2008_range20_50_v003/ranger_evaluation/regional_evaluation_summary.csv
+outputs/training/meow14_egm2008_range20_50_v003/ranger_evaluation/regional_evaluation_overall_metrics.csv
+outputs/training/meow14_egm2008_range20_50_v003/ranger_evaluation/regional_test_diagnostics_by_label_stability.csv
+outputs/training/meow14_egm2008_range20_50_v003/ranger_evaluation/<REG_CODE>/observed_predicted_test30.png
+outputs/training/meow14_egm2008_range20_50_v003/ranger_evaluation/figures/
 ```
 
-旧的 `outputs/training/meow14/` 和 `outputs/training/meow14_egm2008_qc_v001/` 均为历史流程结果，不能与新的 `baseqa_v002` 结果混用，也不能作为本流程的独立外部验证精度。未来有 LiDAR/RTK 后，还需统一垂直基准和潮位参考，再按独立站点或空间块验证。
+旧的 `outputs/training/meow14/`、`outputs/training/meow14_egm2008_qc_v001/` 和 `outputs/training/meow14_egm2008_baseqa_v002/` 均为历史流程结果，不能与新的 `range20_50_v003` 结果混用，也不能作为本流程的独立外部验证精度。未来有 LiDAR/RTK 后，还需统一垂直基准和潮位参考，再按独立站点或空间块验证。
 
 #### 16.5 上传14个 GEE 训练表
 
 对每个区域，在 [Earth Engine Code Editor](https://code.earthengine.google.com/) 的 **Assets → NEW → Table upload** 上传对应的：
 
 ```text
-outputs/training/meow14_egm2008_baseqa_v002/regions/<REG_CODE>/<REG_CODE>_train70.csv
+outputs/training/meow14_egm2008_range20_50_v003/regions/<REG_CODE>/<REG_CODE>_train70.csv
 ```
 
-坐标字段选择 `longitude` 与 `latitude`，坐标系为 `EPSG:4326`。上传到配置给出的目录，并使用精确名称 `<REG_CODE>_train70`。例如版本 `v001`、区域 EAS：
+坐标字段选择 `longitude` 与 `latitude`，坐标系为 `EPSG:4326`。上传到配置给出的目录，并使用精确名称 `<REG_CODE>_train70`。例如当前测试版本 `egm2008_range20_50_v003`、区域 EAS：
 
 ```text
-projects/your-project/assets/global_mangrove_subcanopy_terrain/training/meow14_egm2008_baseqa_v002/EAS_train70
+projects/your-project/assets/global_mangrove_subcanopy_terrain/training/meow14_egm2008_range20_50_v003/EAS_train70
 ```
 
 不要上传 `*_test30.csv` 到 GEE；它只用于本地内部评估。14个 CSV 都含 `sample_id`、`REG_CODE`、`split`、经纬度、标签稳定性字段和 `A00-A63`，模型实际只使用 `elev_median` 与 `A00-A63`。
@@ -719,7 +719,7 @@ projects/your-project/assets/global_mangrove_subcanopy_terrain/training/meow14_e
 程序会逐一确认全部训练资产可读、类型为 `TABLE`、`split/elev_median/A00-A63` 完整，且有效 `train` 行数和本地 `region_manifest.csv` 一致。检查结果保存为：
 
 ```text
-outputs/training/meow14_egm2008_baseqa_v002/gee_training_asset_check.csv
+outputs/training/meow14_egm2008_range20_50_v003/gee_training_asset_check.csv
 ```
 
 任一资产不可读时，先检查当前 `gee.project` 凭证、网页上传 project 与 Asset 路径是否一致。
@@ -731,10 +731,10 @@ outputs/training/meow14_egm2008_baseqa_v002/gee_training_asset_check.csv
 每区的模型资产命名为：
 
 ```text
-projects/your-project/assets/global_mangrove_subcanopy_terrain/models/meow14_egm2008_baseqa_v002/RF_MangroveSubcanopy_MEOW14_<REG_CODE>_Train70_egm2008_baseqa_v002
+projects/your-project/assets/global_mangrove_subcanopy_terrain/models/meow14_egm2008_range20_50_v003/RF_MangroveSubcanopy_MEOW14_<REG_CODE>_Train70_egm2008_range20_50_v003
 ```
 
-已存在的同版本 classifier asset 会直接标记为完成并跳过。失败任务只记录在 `logs/meow14_gee_model_jobs_<project>_egm2008_baseqa_v002.csv`，不会自动降采样、覆盖或重提；选项 `4` 才会显式重提失败区域。全14区调度也会生成一个包含参数、样本数与来源表路径的元数据 TABLE Asset。
+已存在的同版本 classifier asset 会直接标记为完成并跳过。失败任务只记录在 `logs/meow14_gee_model_jobs_<project>_egm2008_range20_50_v003.csv`，不会自动降采样、覆盖或重提；选项 `4` 才会显式重提失败区域。全14区调度也会生成一个包含参数、样本数与来源表路径的元数据 TABLE Asset。
 
 本轮到此为止：不启动全球10 m预测，不做区域拼接或边界羽化。
 
