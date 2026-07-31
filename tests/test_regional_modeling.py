@@ -55,7 +55,9 @@ class RegionalTrainingTests(unittest.TestCase):
                 "regional_modeling:\n"
                 "  input_training_parquet: data/mangrove_gedi_alphaearth_training.parquet\n"
                 "  output_dir: outputs/training/meow14\n"
-                "  model_version: v001\n",
+                "  model_version: v001\n"
+                "sample_qc_experiment:\n"
+                "  h3_resolution: 8\n",
                 encoding="utf-8",
             )
             sync_config(path)
@@ -69,6 +71,7 @@ class RegionalTrainingTests(unittest.TestCase):
             self.assertEqual(loaded["regional_modeling"]["output_dir"], "outputs/training/meow14_egm2008_range20_50_v003")
             self.assertEqual(loaded["regional_modeling"]["model_version"], "egm2008_range20_50_v003")
             self.assertTrue(loaded["regional_modeling"]["elevation_qc_enabled"])
+            self.assertNotIn("sample_qc_experiment", loaded)
 
     def test_sync_config_preserves_user_selected_elevation_qc_switch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,6 +80,21 @@ class RegionalTrainingTests(unittest.TestCase):
             sync_config(path)
             loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
             self.assertFalse(loaded["regional_modeling"]["elevation_qc_enabled"])
+
+    def test_sync_config_enables_range_qc_when_migrating_a_legacy_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.yaml"
+            path.write_text(
+                "regional_modeling:\n"
+                "  output_dir: outputs/training/meow14_egm2008_baseqa_v002\n"
+                "  model_version: egm2008_baseqa_v002\n"
+                "  elevation_qc_enabled: false\n",
+                encoding="utf-8",
+            )
+            sync_config(path)
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+            self.assertTrue(loaded["regional_modeling"]["elevation_qc_enabled"])
+            self.assertEqual(loaded["regional_modeling"]["model_version"], "egm2008_range20_50_v003")
 
     def test_assignment_reports_unassigned_and_overlapping_points(self):
         polygons = np.asarray([shapely.box(0, 0, 2, 2), shapely.box(1, 0, 3, 2)])

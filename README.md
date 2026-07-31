@@ -7,8 +7,8 @@ GMW 2020 红树林范围
   -> GEDI 25 m 月度脚印高程 elev_lowestmode
   -> AlphaEarth / Satellite Embedding 10 m 64 维特征
   -> 本地按 10 m embedding 像元做 GEDI 高程中值聚合
-  -> PROJ 统一到 EGM2008 正高，并在独立样本 QC 试验中比较候选筛选规则
-  -> MEOW-14 区域归属与固定随机 70/30 划分
+  -> PROJ 统一到 EGM2008 正高
+  -> MEOW-14 区域归属审计后按 [-20, 50] m 筛选标签，再固定随机 70/30 划分
   -> 本地 ranger 调参和随机内部验证
   -> GEE 保存 14 个区域回归随机森林 classifier
 ```
@@ -19,9 +19,9 @@ GMW 2020 红树林范围
 
 项目已核验这 201 个瓦片在 GEE 中全部有对应 GEDI 数据，2019-2025 合计 12,688 张月度瓦片影像，每个空间瓦片包含 55-64 个月；内部仍逐月提取，不做时间合成。
 
-当前唯一的生产训练流程是 **MEOW-14 分区建模**。每区独立调参、独立训练；`[-20, 50] m` 不再作为默认生产硬筛选，而是独立 QC 试验中的候选对照。生产流程目前使用既有 `base_qa` 标签，直到获得 LiDAR/RTK 外部验证后再决定是否启用额外筛选。每轮只保存区域 classifier，不启动全球 10 m 预测、区域拼接或边界羽化。
+当前唯一的生产训练流程是 **MEOW-14 分区建模**。每区独立调参、独立训练；在步骤 6b 的区域归属审计通过后，对 EGM2008 `elev_median` 默认执行闭区间 `[-20, 50] m` 的标签完整性筛选，随后才固定 70/30 划分。该规则用于本轮测试，既不是全球红树林的生态绝对高程范围，也不能代替未来 LiDAR/RTK 外部验证。每轮只保存区域 classifier，不启动全球 10 m 预测、区域拼接或边界羽化。
 
-从旧版本升级时，先双击 `run_00b_sync_config.bat`：它会删除已废弃的 `modeling` 配置块，并将原有 `modeling.rscript_path` 自动迁移到 `regional_modeling.rscript_path`。
+从旧版本升级时，先双击 `run_00b_sync_config.bat`：它会删除已废弃的 `modeling` 和 `sample_qc_experiment` 配置块，并将原有 `modeling.rscript_path` 自动迁移到 `regional_modeling.rscript_path`。若检测到旧的 `baseqa_v002` 或 `qc_v001` 版本，它会迁移到当前 `range20_50_v003` 并启用默认高程筛选；随后仍可在 `config.yaml` 手动设置 `elevation_qc_enabled: false`。
 
 ## 重要提醒
 
@@ -575,54 +575,9 @@ outputs/analysis/egm2008_elevation_diagnostics/
 
 默认约需 5 GB 可用磁盘空间和约 10-20 分钟。输出 Parquet 已存在时程序会保护原结果并停止；只有在 PowerShell 命令末尾显式增加 `--overwrite` 才会覆盖。
 
-当前项目默认已将后续输入设为 EGM2008 Parquet。步骤5b完成后，先进行下一节的样本 QC 对照试验；不应再使用原始椭球高 Parquet。
+当前项目默认已将后续输入设为 EGM2008 Parquet。步骤 5b 完成后，直接执行步骤 6a 和步骤 6b；不应再使用原始椭球高 Parquet。
 
-### 15. 样本筛选试验：先比较，后决定
-
-本节不改写原始训练数据，也不宣称任何筛选规则已提高真实地形精度。因为当前没有独立 LiDAR/RTK，全部结果仅用于比较 GEDI 聚合标签的重复观测稳定性、局地空间一致性和对 AlphaEarth 特征的内部可预测性。
-
-`[-20, 50] m` 现在作为本项目**测试版生产流程的默认标签完整性质控**，以排除 EGM2008 改正后仍明显不可信的极端标签。它不是全球红树林的统一生态高程界限，也不能据此声称获得真实地形精度。红树林低平潮间带的生态背景支持审查极端标签，但 EGM2008 正高不等同于局地潮位基准；不能用产品色标、极端样本比例或单篇局地研究确定全球硬阈值。完整依据、文献边界和规则定义见 [样本筛选试验说明](docs/SAMPLE_QC_EXPERIMENT.md)。
-
-#### 15.1 双击 `run_05c_prepare_sample_qc.bat`
-
-作用：从完整 EGM2008 Parquet 生成不含 64 个特征重复副本的轻量级 `qc_flags.parquet`，固定 seed=42 的 70/30 划分，并审计四类标签：`base_qa`、`range_candidate`、H3 局地 MAD 候选离群以及 `repeat_high_confidence`。
-
-其中，只有 `elev_count >= 2` 且 `elev_iqr` 不超过 1、2 或 5 m 的像元才会进入多重访高置信代理集。单次观测即使 IQR 显示为 0 也不会被当成稳定标签。程序不会改写原始训练 Parquet，也不会删除样本。
-
-成功后会生成：
-
-```text
-outputs/analysis/sample_qc_experiment/qc_flags.parquet
-outputs/analysis/sample_qc_experiment/qc_retention_by_region.csv
-outputs/analysis/sample_qc_experiment/qc_h3_summary.parquet
-outputs/analysis/sample_qc_experiment/gedi_qc_pilot_plan.csv
-outputs/analysis/sample_qc_experiment/qc_experiment_summary.json
-outputs/analysis/sample_qc_experiment/figures/
-```
-
-全量试验将分批读取约 701 万像元，依赖磁盘性能，预计需要数十分钟和数 GB 临时空间。结果已存在时为防止误覆盖会停止；只有 PowerShell 命令显式增加 `--overwrite` 才会重建。
-
-#### 15.2 GEDI 原始质量字段小样本：先检查、再提交
-
-先双击 `run_05d_inspect_gedi_qc_bands.bat`。它只读取 GEDI 月度产品的 `bandNames()`，确认 `sensitivity`、`elev_sensitivity`、`surface_flag`、`num_detectedmodes`、`beam` 和 `solar_elevation` 等字段是否实际存在；不会提交 GEE 任务，也不会调用 AlphaEarth。
-
-然后双击 `run_05e_preview_gedi_qc_pilot.bat`。它只显示 14 个固定 H3-8 空间块和将要导出的字段。确认后才双击 `run_05f_submit_gedi_qc_pilot.bat`，创建最多 14 个临时 GEE Table Assets。pilot 不重导全量 GEDI、不采样 AlphaEarth；字段存在也不自动成为全球筛选条件，必须结合数据字典、区域留存和后续独立验证判断。
-
-#### 15.3 固定参数 ranger 内部对照和 Word 报告
-
-先双击 `run_06g_prepare_sample_qc_model_inputs.bat`。它为 `base_qa`、`range_candidate` 和 `provisional_screened` 生成可比的 R 输入。三个候选集使用同一冻结划分、相同地区训练上限和同样的 64 个有效 AlphaEarth 特征，不重新调参。
-
-再确保已完成 `run_06a_check_r.bat`，双击 `run_06h_evaluate_sample_qc_candidates.bat`。它使用固定 `ranger` 参数输出基线 `test30` 与未参与训练的多重访高置信代理集上的 RMSE、MAE、Bias、R2 和残差统计。这些不是 LiDAR/RTK 外部精度。
-
-最后双击 `run_06i_create_sample_qc_report.bat`，输出：
-
-```text
-outputs/analysis/sample_qc_experiment/GEDI_红树林林下地形样本筛选试验报告.docx
-```
-
-报告会记录候选规则、逐区留存、空间覆盖、文献依据和已完成的内部对照。没有运行 R 对照时，报告会明确标注该章节尚无结果，不会编造指标。
-
-### 16. 推荐生产流程：MEOW-14 分区建模
+### 15. 推荐生产流程：MEOW-14 分区建模
 
 本流程使用 14 个 MEOW 派生区，而不是逐一训练 232 个原始生态区。预测变量严格为 AlphaEarth 时间均值 `A00-A63`；标签为 2019-2025 GEDI `elev_lowestmode` 的10 m像元中值。结果属于经验统计下推：本地 test30 只是对 GEDI 聚合标签的随机内部验证，不可替代 LiDAR/RTK 外部验证，也不能直接称作真实林下地形精度。
 
@@ -630,11 +585,11 @@ outputs/analysis/sample_qc_experiment/GEDI_红树林林下地形样本筛选试�
 
 每一个双击入口都会先显示中文说明，只有输入大写 `Y` 才会执行。
 
-#### 16.1 先检查 R：双击 `run_06a_check_r.bat`
+#### 15.1 先检查 R：双击 `run_06a_check_r.bat`
 
 检查 `Rscript.exe`、`ranger`、`data.table`、`ggplot2` 和 `MASS`。未检测到 R 时会显示 CRAN 下载地址和建议安装目录；直接回车确认、输入新目录修改，或输入 `N` 取消。成功后实际 R 路径会保存到 `config.yaml` 的 `regional_modeling.rscript_path`。
 
-#### 16.2 准备区域样本：双击 `run_06b_prepare_meow14_training.bat`
+#### 15.2 准备区域样本并执行高程筛选：双击 `run_06b_prepare_meow14_training.bat`
 
 运行前确认两项配置：
 
@@ -652,7 +607,14 @@ regional_modeling:
   elevation_max_m: 50.0
 ```
 
-程序用 `pyogrio + shapely + pyarrow` 分批读取 Parquet，严格要求每个像元只命中一个区域；任意未归属或多重归属都会终止，不会悄悄分配。随后在空间归属审计通过后，默认保留闭区间 `[-20, 50] m` 内的 EGM2008 标签，再按 `ae_x + ae_y + seed=42` 的稳定哈希划分约 70% `train` 和 30% `test`，同一 10 m 像元不会进入两个集合。范围开关与阈值均可在 `config.yaml` 修改；本次默认设置用于测试，后续仍应以 LiDAR/RTK 外部验证决定最终规则。
+这一步按以下顺序执行：
+
+1. 分批读取完整 EGM2008 Parquet，并检查必要字段和有限值。
+2. 将每个 10 m 像元按 `lon_median/lat_median` 严格归入一个 MEOW-14 区域；任意未归属或多重归属都会终止，不会悄悄分配。
+3. **区域归属审计通过后**，对 `elev_median` 执行闭区间 `-20.0 <= elev_median <= 50.0 m` 筛选。边界值 `-20.0` 和 `50.0` 保留，只有更小或更大的标签被移除。
+4. 对保留像元按 `ae_x + ae_y + seed=42` 的稳定哈希划分约 70% `train` 和 30% `test`；同一 10 m 像元不会进入两个集合。
+
+因此，`[-20, 50] m` 的实际筛选位置就是 **步骤 6b 的第 3 步**，既不在 5b 垂直基准转换中，也不在 R 调参或 GEE 训练时临时筛选。当前完整表的预期输入为 `7,010,871` 个像元；按该范围的历史诊断预计保留 `7,003,281` 个（99.892%），但每次运行必须以本轮生成的审计文件为准。范围开关与阈值均可在 `config.yaml` 修改；本次默认设置用于测试，后续仍应以 LiDAR/RTK 外部验证决定最终规则。筛选依据、文献边界和适用限制见 [EGM2008 高程标签质控依据](docs/EGM2008_ELEVATION_QC_RATIONALE.md)。
 
 提供的 MEOW-14 面含自相交环。程序优先以 Shapely/GEOS 的 `buffer(0)` 修复，再检查面有效性及任意两区的面积重叠；这是为了避免 `make_valid()` 在该文件中将 SEE 的连续覆盖范围意外拆出孔洞。修复区域和方法会写入区域归属审计。若仍发现未归属或多重归属，程序会停止并保留坐标示例供核查，绝不按最近区域自动分配。
 
@@ -670,7 +632,7 @@ outputs/training/meow14_egm2008_range20_50_v003/regions/<REG_CODE>/<REG_CODE>_te
 
 `elevation_qc_audit.json` 与 `elevation_qc_by_region.csv` 会记录本轮阈值、低于下限数、高于上限数、保留数和逐区留存率；默认应显示 `enabled: true` 和 `[-20, 50] m`。`region_manifest.csv` 是后续 R 与 GEE 的唯一文件清单。它应有14行，分别为 `AFW, AFE, RSG, IND, EAS, SEW, SEE, OCN, AUS, PAC, AMW, GMX, CAR, AME`。
 
-#### 16.3 逐区调参：双击 `run_06c_tune_meow14_ranger.bat`
+#### 15.3 逐区调参：双击 `run_06c_tune_meow14_ranger.bat`
 
 每区只读取该区完整 `train70`，独立进行5次10%无放回子样本抽取。每个重复内的样本固定，并被全部24组参数共用：`trees=100/200/300`、`mtry=8/16`、`bagFraction=0.5/0.632`、`min.node.size=5/10`；`ranger` 明确使用 `replace=FALSE`。按重复 OOB RMSE 均值排名，取前10组参数的均值作为该区 GEE 参数，再在同一批训练子样本上进行 OOB 确认。
 
@@ -682,7 +644,7 @@ outputs/training/meow14_egm2008_range20_50_v003/ranger_tuning/<REG_CODE>/ranger_
 outputs/training/meow14_egm2008_range20_50_v003/ranger_tuning/regional_tuning_summary.csv
 ```
 
-#### 16.4 本地最终模型与精度：双击 `run_06d_evaluate_meow14_ranger.bat`
+#### 15.4 本地最终模型与精度：双击 `run_06d_evaluate_meow14_ranger.bat`
 
 每区按自己的最优参数，用完整 `train70` 拟合一个本地 `ranger` 模型，再分批预测完整锁定 `test30`。输出各区以及全部区域的加权指标与宏平均指标：`RMSE`、`MAE`、`Bias`、`R2`、残差分位数，并按 `elev_count` 与 `elev_iqr` 生成标签稳定性诊断。
 
@@ -698,7 +660,7 @@ outputs/training/meow14_egm2008_range20_50_v003/ranger_evaluation/figures/
 
 旧的 `outputs/training/meow14/`、`outputs/training/meow14_egm2008_qc_v001/` 和 `outputs/training/meow14_egm2008_baseqa_v002/` 均为历史流程结果，不能与新的 `range20_50_v003` 结果混用，也不能作为本流程的独立外部验证精度。未来有 LiDAR/RTK 后，还需统一垂直基准和潮位参考，再按独立站点或空间块验证。
 
-#### 16.5 上传14个 GEE 训练表
+#### 15.5 上传14个 GEE 训练表
 
 对每个区域，在 [Earth Engine Code Editor](https://code.earthengine.google.com/) 的 **Assets → NEW → Table upload** 上传对应的：
 
@@ -714,7 +676,7 @@ projects/your-project/assets/global_mangrove_subcanopy_terrain/training/meow14_e
 
 不要上传 `*_test30.csv` 到 GEE；它只用于本地内部评估。14个 CSV 都含 `sample_id`、`REG_CODE`、`split`、经纬度、标签稳定性字段和 `A00-A63`，模型实际只使用 `elev_median` 与 `A00-A63`。
 
-#### 16.6 检查上传结果：双击 `run_06e_check_meow14_gee_assets.bat`
+#### 15.6 检查上传结果：双击 `run_06e_check_meow14_gee_assets.bat`
 
 程序会逐一确认全部训练资产可读、类型为 `TABLE`、`split/elev_median/A00-A63` 完整，且有效 `train` 行数和本地 `region_manifest.csv` 一致。检查结果保存为：
 
@@ -724,7 +686,7 @@ outputs/training/meow14_egm2008_range20_50_v003/gee_training_asset_check.csv
 
 任一资产不可读时，先检查当前 `gee.project` 凭证、网页上传 project 与 Asset 路径是否一致。
 
-#### 16.7 提交区域 GEE 模型：双击 `run_06f_submit_meow14_gee_models.bat`
+#### 15.7 提交区域 GEE 模型：双击 `run_06f_submit_meow14_gee_models.bat`
 
 按顺序操作：先选 `1` 提交 EAS smoke test；EAS 的 classifier asset 完成后，再选 `2` 提交 AME 最大区压力测试；确认最大区可完成后，选 `3` 持续调度全部14区。调度器会读取本地任务清单和实际 classifier asset，最多保留3个当前账号的活跃 GEE 任务。
 
@@ -865,21 +827,6 @@ powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
 
 ```powershell
 .\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml convert-egm2008 --overwrite
-```
-
-### 样本筛选试验
-
-以下命令与双击入口对应。`prepare-sample-qc` 只创建独立 QC 标记，不改写原始 EGM2008 表；`export-gedi-qc-pilot` 默认是预览，只有明确给出 `--submit` 才会提交临时 GEE Table Assets。
-
-```powershell
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml prepare-sample-qc
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml inspect-gedi-qc-bands
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml export-gedi-qc-pilot
-# 已确认 pilot 计划和 GEDI 字段后才运行：
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml export-gedi-qc-pilot --submit
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml prepare-sample-qc-model-inputs
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml evaluate-sample-qc-candidates
-.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml create-sample-qc-report
 ```
 
 ### MEOW-14 分区建模
