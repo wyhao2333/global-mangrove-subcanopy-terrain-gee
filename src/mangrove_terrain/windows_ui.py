@@ -4,7 +4,7 @@ from __future__ import annotations
 GUIDES = {
     "auth": ("新增或更新 GEE 账号凭证", "程序会显示授权链接，请在指定浏览器完成 Earth Engine 认证。"),
     "grant_source_access": ("批量授予 GEDI 来源资产读取权限", "必须使用来源资产拥有者账号认证。程序先检查目录和全部表资产，再要求输入 GRANT 才会写入权限。"),
-    "sync_config": ("同步 MEOW-14 配置", "将补入当前区域流程所需字段，并把旧版全局 R 路径迁移到 regional_modeling；不会覆盖你已有的区域设置。"),
+    "sync_config": ("同步 MEOW-14 配置", "将补入当前区域流程所需字段，移除已废弃的 sample_qc_experiment，并把旧版 baseqa/qc 版本迁移到当前 [-20, 50] m 默认流程；新版本中的自定义区域设置会保留。"),
     "check": ("检查 GEE 环境", "将检查当前账号、GEDI、AlphaEarth 和 GMW 公共数据集是否可用。"),
     "prepare": ("生成 GMW 索引", "将读取本地 GMW 矢量，生成全球原生GEDI瓦片与空间块索引。"),
     "validate": ("验证采样一致性", "将比较旧流程和新流程的小样本字段，任何差异都会报错。"),
@@ -25,13 +25,6 @@ GUIDES = {
     "regional_evaluate": ("MEOW-14 步骤6d：本地最终模型与测试精度", "每区以完整 train70 拟合，并只在固定 test30 上报告 RMSE、MAE、Bias 和 R2；每区另生成含完整测试集指标和1:1线的散点图。这是 GEDI 标签的随机内部验证，不是 LiDAR/RTK 外部精度。"),
     "regional_gee_check": ("MEOW-14 步骤6e：检查 GEE 区域训练表", "请先在 Earth Engine 网页上传14个 *_train70.csv。程序会逐一核对 TABLE 类型、必需字段和有效训练样本数。"),
     "regional_gee_models": ("MEOW-14 步骤6f：提交 GEE 区域模型", "先选择 EAS 小区 smoke test，再选择 AME 最大区压力测试；二者完成后再启动全部14区调度。调度器始终最多保留3个总活跃任务。"),
-    "sample_qc_prepare": ("样本筛选试验 1/6：建立 QC 标记", "将逐批读取 EGM2008 聚合表，创建独立 qc_flags.parquet，并比较高程范围、H3 局地 MAD 与重访/IQR 标记。不会删除或改写原始训练表，也不会改变当前生产 MEOW-14 流程。预计需要较长时间和数 GB 临时磁盘空间。"),
-    "sample_qc_band_inventory": ("样本筛选试验 2/6：检查 GEDI 原始质量字段", "这是只读 GEE 检查：读取 GEDI 月度产品首景的 bandNames，确认 sensitivity、surface_flag、模式等字段是否实际存在。不会提交 GEE 任务，也不会调用 AlphaEarth。"),
-    "sample_qc_pilot": ("样本筛选试验 3/6：GEDI 原始质量字段小样本", "默认仅预览 14 个固定 H3 小块和将要读取的 GEDI 字段，不创建任务。确认字段语义、空间块和预览清单后，才会在第二次确认中以 --submit 创建临时 Table Assets。该步骤不调用 AlphaEarth，也不重导全量 GEDI。"),
-    "sample_qc_pilot_submit": ("样本筛选试验 3/6：提交 GEDI 原始质量字段小样本", "将为最多 14 个固定 H3 小块创建临时 GEE Table Asset，专门比较 GEDI 原始质量字段。请先完成字段检查与预览；本次不会调用 AlphaEarth，也不会重导全量 GEDI。输入 Y 后才会提交任务。"),
-    "sample_qc_model_inputs": ("样本筛选试验 4/6：准备固定参数 ranger 对照输入", "将从原始 EGM2008 表和 qc_flags.parquet 生成三个候选规则的可比 CSV。所有候选集冻结同一随机 70/30 划分、同一地区训练上限，且只保留 64 个 AlphaEarth 特征均有效的像元。不会重新调参。"),
-    "sample_qc_evaluate": ("样本筛选试验 5/6：固定参数 ranger 内部对照", "以相同的随机森林参数比较 base_qa、范围候选和多证据候选样本。指标只表示对 GEDI 聚合标签的内部可预测性，不是 LiDAR/RTK 外部地形精度；需要先完成 R 环境检查。"),
-    "sample_qc_report": ("样本筛选试验 6/6：生成中文 Word 报告", "汇总 QC 审计、各区留存、空间覆盖和已完成的内部对照指标，生成不夸大结论的中文 Word 报告。未运行 ranger 对照时，报告会明确标明该章节尚无结果。"),
 }
 
 

@@ -59,34 +59,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "alpha_min_chunk_degrees": 0.0625,
     },
     "aggregation": {"min_elev_count": 1, "preview_csv_rows": 10000},
-    "sample_qc_experiment": {
-        # 此模块只创建独立的 QC 标记和对照试验结果；绝不修改原始 EGM2008 训练 Parquet。
-        "input_training_parquet": "data/mangrove_gedi_alphaearth_training_egm2008.parquet",
-        "output_dir": "outputs/analysis/sample_qc_experiment",
-        "split_seed": 42,
-        "train_fraction": 0.70,
-        "h3_resolution": 8,
-        "h3_min_samples": 5,
-        "spatial_absolute_residual_m": 5.0,
-        "spatial_robust_z_threshold": 6.0,
-        "spatial_mad_floor_m": 0.5,
-        # 仅作为敏感性对照，不是全球红树林的生态学绝对高程范围。
-        "range_min_m": -20.0,
-        "range_max_m": 50.0,
-        "repeat_iqr_thresholds_m": [1.0, 2.0, 5.0],
-        # 指定其中一个 IQR 阈值作为高置信代理测试集；该集合不参与候选模型训练。
-        "repeat_reference_iqr_threshold_m": 2.0,
-        "model_train_cap_per_region": 10000,
-        "model_test_cap_per_region": 5000,
-        "model_number_of_trees": 300,
-        "model_mtry": 16,
-        "model_bag_fraction": 0.632,
-        "model_min_node_size": 5,
-        "gedi_pilot_asset_root": "projects/{project}/assets/global_mangrove_subcanopy_terrain/qc_pilot",
-        "gedi_pilot_min_cell_samples": 50,
-        "gedi_pilot_max_cell_samples": 5000,
-        "gedi_pilot_max_regions": 14,
-    },
     "vertical_datum": {
         "input_parquet": "data/mangrove_gedi_alphaearth_training.parquet",
         "output_parquet": "data/mangrove_gedi_alphaearth_training_egm2008.parquet",
@@ -165,6 +137,8 @@ def sync_config(config_path: str | Path | None = None) -> Path:
         with path.open("r", encoding="utf-8") as f:
             existing = yaml.safe_load(f) or {}
     legacy_modeling = existing.pop("modeling", None)
+    # 样本筛选试验支线已废弃；范围质控现在由步骤 6b 的正式区域流程执行。
+    existing.pop("sample_qc_experiment", None)
     regional = existing.setdefault("regional_modeling", {})
     if not isinstance(regional, dict):
         raise ValueError("regional_modeling 必须是 YAML 对象。")
@@ -184,6 +158,10 @@ def sync_config(config_path: str | Path | None = None) -> Path:
             regional[key] = deepcopy(DEFAULT_CONFIG["regional_modeling"][key])
     # 历史 baseqa_v002 和 qc_v001 均使用旧的结果目录/模型版本。
     # 当前默认开启范围质控，因此迁移到新的独立目录，避免与既有结果混用。
+    legacy_regional_version = regional.get("output_dir") in {
+        "outputs/training/meow14_egm2008_baseqa_v002",
+        "outputs/training/meow14_egm2008_qc_v001",
+    } or regional.get("model_version") in {"egm2008_baseqa_v002", "egm2008_qc_v001"}
     if regional.get("output_dir") in {
         "outputs/training/meow14_egm2008_baseqa_v002",
         "outputs/training/meow14_egm2008_qc_v001",
@@ -191,6 +169,8 @@ def sync_config(config_path: str | Path | None = None) -> Path:
         regional["output_dir"] = deepcopy(DEFAULT_CONFIG["regional_modeling"]["output_dir"])
     if regional.get("model_version") in {"egm2008_baseqa_v002", "egm2008_qc_v001"}:
         regional["model_version"] = deepcopy(DEFAULT_CONFIG["regional_modeling"]["model_version"])
+    if legacy_regional_version:
+        regional["elevation_qc_enabled"] = True
     merged = deepcopy(DEFAULT_CONFIG)
     _deep_update(merged, existing)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,6 @@
-# EGM2008 高程标签质控依据与引用说明（历史 v001 记录）
+# EGM2008 高程标签质控依据与引用说明
 
-> 当前项目不再把 `[-20, 50] m` 作为 MEOW-14 生产流程的默认硬筛选。`regional_modeling.elevation_qc_enabled` 默认值已改为 `false`；该区间仅在 [样本筛选试验说明](SAMPLE_QC_EXPERIMENT.md) 中作为敏感性候选规则。本文保留为此前 v001 设计与诊断的历史记录，不应被解读为全球红树林 EGM2008 高程的统一生态边界。
+> 当前测试版生产流程使用 `regional_modeling.elevation_qc_enabled: true`，在步骤 6b 的 MEOW-14 空间归属审计通过后，对 EGM2008 `elev_median` 应用闭区间 `[-20, 50] m`。这是一项保守的标签完整性筛选，不是全球红树林 EGM2008 正高的统一生态边界。
 
 ## 1. 结论
 
@@ -28,8 +28,8 @@ MEOW-14 分区训练默认对 `elev_median` 使用闭区间 `[-20, 50] m`。这�
 阈值是闭区间：`-20.0 m` 和 `50.0 m` 本身保留；只有严格小于下限或严格大于上限的记录会被去除。运行 `run_06b_prepare_meow14_training.bat` 后，可在以下文件审计实际影响：
 
 ```text
-outputs/training/meow14_egm2008_qc_v001/elevation_qc_audit.json
-outputs/training/meow14_egm2008_qc_v001/elevation_qc_by_region.csv
+outputs/training/meow14_egm2008_range20_50_v003/elevation_qc_audit.json
+outputs/training/meow14_egm2008_range20_50_v003/elevation_qc_by_region.csv
 ```
 
 ## 3. 为什么采用一个宽容的范围
@@ -51,7 +51,7 @@ outputs/training/meow14_egm2008_qc_v001/elevation_qc_by_region.csv
 * **下限 -20 m：** 对潮间带红树林而言，这比接近潮位面的通常地貌位置向下留出了 20 m 的极宽余量。这样做避免因 EGM2008 与局地潮位基准不同、潮汐时相或局地河口地形而误删靠近海平面的样本；仍然低于该值的记录应优先检查其 GEDI 最低模式、坐标与水面/非地面回波。
 * **上限 50 m：** 该值明显高于本项目 99.9% 分位数（29.59 m），保留了高于主体分布约 20 m 的缓冲。超过该值的少量像元在潮间带低平背景下更像是异常训练标签，而不是需要用来外推的典型林下地形。
 * **双侧而非单侧：** 只去除高值不能防止深负值将模型向不合理方向拉动；只去除负值又无法隔离可能残留的冠层或模式识别异常。因此同时审计上下两个尾部。
-* **可更改但须重跑：** 阈值位于 `config.yaml` 的 `regional_modeling.elevation_min_m` 与 `elevation_max_m`。任何改变都会改变每区的 train/test 样本，必须重新运行步骤 6b、6c 和 6d；不能与当前 `egm2008_qc_v001` 结果混用。
+* **可更改但须重跑：** 阈值位于 `config.yaml` 的 `regional_modeling.elevation_min_m` 与 `elevation_max_m`。任何改变都会改变每区的 train/test 样本，必须重新运行步骤 6b、6c 和 6d；不能与当前 `egm2008_range20_50_v003` 结果混用。
 
 ## 4. 推荐引用
 
