@@ -37,8 +37,10 @@ Windows 上这些库很容易因为 GDAL、PROJ、GEOS、Fiona 版本不一致�
 本项目默认 **不依赖 GeoPandas、不依赖 geemap、不依赖 Python GDAL 包**，只使用更容易安装的 wheel 包：
 
 ```text
-pyogrio + pyarrow + shapely + pyproj
+pyogrio + pyarrow + shapely + pyproj + rasterio + scipy
 ```
+
+其中 `rasterio` 只在步骤05c读取 1 m GeoTIFF 时使用，安装的是预编译 Windows wheel；用户不需要自行安装或配置 GDAL，也不需要安装 GeoPandas。
 
 ## 电脑需要先安装什么
 
@@ -585,6 +587,70 @@ outputs/analysis/egm2008_elevation_diagnostics/
 
 每一个双击入口都会先显示中文说明，只有输入大写 `Y` 才会执行。
 
+#### 14.2 NZ LiDAR 对 EGM2008 GEDI 标签的外部一致性验证：双击 `run_05c_validate_nz_lidar.bat`
+
+这一步位于 **05b EGM2008 高程转换之后、MEOW-14 步骤6b之前**。它只用于检验当前 GEDI 聚合标签 `elev_median` 与 NZ 1 m LiDAR DEM 的外部一致性，不会修改任何 Parquet，不会重新下载 GEDI，也不会提交或读取 GEE 任务。
+
+运行前确认：
+
+1. 已完成 05b，且 `data/mangrove_gedi_alphaearth_training_egm2008.parquet` 存在。
+2. NZ LiDAR 根目录存在，默认是：
+
+   ```text
+   J:\NZL_Lidar_DEM\3-Beach_Overlap_DEM_ModeRemoved_EGM2008(2018-2023)
+   ```
+
+3. 首次使用本版本时，先重新双击一次 `setup_windows.bat`。它会以 Windows 二进制 wheel 安装 `rasterio` 和 `scipy`；不需要手工安装 GDAL、GeoPandas 或 QGIS。
+
+默认设置在 `config.yaml` 的 `nz_lidar_validation` 中：
+
+```yaml
+nz_lidar_validation:
+  input_parquet: data/mangrove_gedi_alphaearth_training_egm2008.parquet
+  lidar_root: J:/NZL_Lidar_DEM/3-Beach_Overlap_DEM_ModeRemoved_EGM2008(2018-2023)
+  output_dir: outputs/validation/nz_lidar_egm2008_overlap_v001
+  gedi_start_year: 2019
+  gedi_end_year: 2025
+  footprint_radius_m: 12.5
+  min_valid_lidar_cells: 250
+  plot_max_points: 25000
+```
+
+程序会递归扫描全部 GeoTIFF，从**最近的调查目录名**解析调查年份（如 `2020-2023` 或 `2021`），只保留与 GEDI 2019-2025 名义相交的数据。重复下载目录，例如文件夹名带 `(1)` 的同名同大小 DEM，会按“调查名称、年份窗口、文件名、文件大小”归并，只保留路径字典序最靠前的规范文件，因此不会把同一 LiDAR DEM 重复计入精度统计。
+
+对于每个落在 LiDAR 范围内的 10 m GEDI 聚合像元，程序以 `lon_median/lat_median` 为中心，读取一个局部窗口，并以 **12.5 m 大地测量半径**严格保留圆内的有效 LiDAR 1 m 像元。`-9999`、NoData、非有限值和圆外像元都会排除；圆内至少有 `250` 个有效像元时，LiDAR 足迹中值才可作为参考值。多个非重复调查覆盖同一点时，按以下固定顺序选择唯一值：有效像元数最多、调查年份窗口更短、调查中点更接近 2022、文件路径字典序更靠前。
+
+GEDI 标签是 2019-2025 月度观测聚合后的全期中值，而 LiDAR 调查发生在 2018-2023 的不同年份；因此本步骤必须表述为：**与 NZ LiDAR 存在名义年份重叠的外部一致性验证**，不是严格同期验证。每条匹配记录都会保留 LiDAR 调查年份窗口和其与 GEDI 总期的名义交集。
+
+Bias 的定义固定为：
+
+```text
+Bias = GEDI elev_median - LiDAR 足迹中值
+```
+
+所以 Bias 为正表示 GEDI 标签偏高。主指标和总体图使用所有空间匹配且 LiDAR 支持充分的样本；同时 `overall_metrics.csv` 和 `metrics_by_survey_year.csv` 会并列给出未删样本与 `-20 <= elev_median <= 50 m` 后的两套结果，以检验该生产候选范围是否提升外部一致性。它们评估的是 GEDI 标签，不是 AlphaEarth 特征或随机森林模型的精度。
+
+成功后会生成：
+
+```text
+outputs/validation/nz_lidar_egm2008_overlap_v001/
+  lidar_catalog.csv                         # 所有 TIFF、年份、CRS、分辨率、NoData 和有效性状态
+  lidar_duplicate_audit.csv                 # 重复文件归并和规范来源记录
+  matched_gedi_lidar_records.parquet/.csv   # 原始 GEDI-LiDAR 匹配记录
+  excluded_covered_gedi_records.parquet/.csv# 落入粗筛范围但未达 LiDAR 支持阈值的记录及原因
+  matching_summary.json                     # 覆盖、排除、时间解释和 Bias 符号审计
+  overall_metrics.csv                       # 全部匹配与 [-20, 50] m 对照指标
+  metrics_by_survey_year.csv                # 按调查区和年份窗口的指标
+  figures/
+    01_overall_kde_density_scatter.png      # 总体二维 KDE 密度散点图、1:1线和完整样本指标
+    02_density_scatter_*.png                # 各 LiDAR 调查区/年份窗口密度散点图
+    03_residual_histogram.png
+    04_residual_vs_lidar.png
+    05_spatial_matching_summary.png
+```
+
+总体二维密度散点图的 X 轴为 LiDAR EGM2008 高程，Y 轴为 GEDI EGM2008 高程；两轴同范围且等比例，黑色虚线为 1:1 线。绘图最多固定种子抽取 25,000 点，以避免文件过大；R2、RMSE、MAE 和 Bias 始终由全部有效匹配样本计算。大规模表会按 `batch_rows` 分批读取，DEM 也只读取每个 25 m 足迹附近的小窗口；具体运行时间取决于本机磁盘和 NZ 覆盖样本数，可安全在不中断时等待完成。结果目录已经存在时默认拒绝覆盖，避免误删旧结果；只有明确的 `--overwrite` 才会替换它。
+
 #### 15.1 先检查 R：双击 `run_06a_check_r.bat`
 
 检查 `Rscript.exe`、`ranger`、`data.table`、`ggplot2` 和 `MASS`。未检测到 R 时会显示 CRAN 下载地址和建议安装目录；直接回车确认、输入新目录修改，或输入 `N` 取消。成功后实际 R 路径会保存到 `config.yaml` 的 `regional_modeling.rscript_path`。
@@ -827,6 +893,18 @@ powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
 
 ```powershell
 .\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml convert-egm2008 --overwrite
+```
+
+### NZ LiDAR 外部一致性验证（步骤05c）
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml validate-nz-lidar
+```
+
+只想在修改参数后先排查命令、输入文件或 LiDAR 路径时，可限定为输入表前 100,000 行。它不代表空间随机 smoke test，因此实际外部验证仍应运行不带 `--max-rows` 的完整命令：
+
+```powershell
+.\.venv\Scripts\python.exe -m mangrove_terrain --config config.yaml validate-nz-lidar --max-rows 100000 --output-dir outputs/validation/nz_lidar_smoke_test
 ```
 
 ### MEOW-14 分区建模

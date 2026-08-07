@@ -17,6 +17,7 @@ from . import (
     export_samples,
     export_staged,
     inspect_gee,
+    nz_lidar_validation,
     prepare_gmw,
     regional_gee_models,
     regional_ranger,
@@ -151,6 +152,13 @@ def main() -> None:
     p_egm2008.add_argument("--grid", default=None, help="PROJ 可读取的 EGM2008 GeoTIFF 路径")
     p_egm2008.add_argument("--analysis-dir", default=None, help="统计表、图件和候选异常点输出目录")
     p_egm2008.add_argument("--overwrite", action="store_true", help="明确允许覆盖已有 EGM2008 输出 Parquet")
+
+    p_nz_lidar = sub.add_parser("validate-nz-lidar", help="步骤05c：NZ 1 m LiDAR 对 EGM2008 GEDI 标签的外部一致性验证")
+    p_nz_lidar.add_argument("--input", default=None, help="输入 EGM2008 聚合训练 Parquet 路径")
+    p_nz_lidar.add_argument("--lidar-root", default=None, help="NZ LiDAR GeoTIFF 根目录")
+    p_nz_lidar.add_argument("--output-dir", default=None, help="验证结果输出目录")
+    p_nz_lidar.add_argument("--max-rows", type=int, default=None, help="仅处理输入表前 N 行，供小样本排错")
+    p_nz_lidar.add_argument("--overwrite", action="store_true", help="明确允许替换已有验证结果目录")
 
     p_r_check = sub.add_parser("check-r-environment", help="步骤6a：检查或安装 R/ranger 环境")
     p_r_check.add_argument("--interactive", action="store_true", help="找不到 R 时按中文提示下载安装")
@@ -314,6 +322,15 @@ def main() -> None:
                 output_path=args.output,
                 grid_path=args.grid,
                 analysis_dir=args.analysis_dir,
+                overwrite=args.overwrite,
+            )
+        elif args.command == "validate-nz-lidar":
+            nz_lidar_validation.run(
+                cfg,
+                input_path=args.input,
+                lidar_root=args.lidar_root,
+                output_dir=args.output_dir,
+                max_rows=args.max_rows,
                 overwrite=args.overwrite,
             )
         elif args.command == "check-r-environment":

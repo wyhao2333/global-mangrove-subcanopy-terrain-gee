@@ -19,6 +19,7 @@ GUIDES = {
     "stage2_local_download": ("步骤4c：直接下载 AlphaEarth 表资产", "读取步骤4b已经完成的 AlphaEarth 输出目录，直接下载 CSV 到 outputs/raw_samples，不会创建 Drive 或 GEE 导出任务。"),
     "aggregate": ("步骤5：本地中值聚合", "将读取 outputs/raw_samples 中下载的CSV或Parquet，并生成训练表。"),
     "egm2008": ("步骤5b：统一 GEDI 高程基准到 EGM2008", "将读取完整聚合训练 Parquet，保留原始 WGS84 椭球高并生成新的 EGM2008 训练表、分布统计和异常候选点审查图。不会删除样本、不会修改原始文件，也不会启动 R 或 GEE 任务。默认需要约 5 GB 可用磁盘空间。"),
+    "nz_lidar_validation": ("步骤05c：NZ LiDAR 外部一致性验证", "将用 NZ 1 m LiDAR DEM 的 25 m 圆形足迹中值核对 EGM2008 GEDI 聚合标签。GEDI 标签是 2019-2025 全期中值，LiDAR 是 2018-2023 调查数据；结果只能称为存在名义年份重叠的外部一致性验证，不是严格同期验证。程序不会修改 Parquet、不会创建 GEE 任务。"),
     "r_check": ("步骤6a：检查 R/ranger 环境", "未找到 R 时会提示从 CRAN 下载，并允许确认或修改安装目录。"),
     "regional_prepare": ("MEOW-14 步骤6b：准备区域训练样本", "将读取 EGM2008 聚合 Parquet，严格核验每个像元只归属一个区域；随后按配置的闭区间 [-20, 50] m 做标签完整性筛选，再为每区生成固定随机70/30划分和全局、逐区质控审计。"),
     "regional_tune": ("MEOW-14 步骤6c：逐区 ranger 调参", "每区仅使用 train70，进行5次独立10%无放回抽样和24组参数的 OOB 比较。运行时间较长，可按 Ctrl+C 停止后重新运行。"),
