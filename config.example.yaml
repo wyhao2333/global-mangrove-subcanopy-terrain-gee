@@ -80,6 +80,18 @@ vertical_datum:
   candidate_low_m: -20.0
   candidate_high_m: 50.0
 
+nz_lidar_validation:
+  input_parquet: data/mangrove_gedi_alphaearth_training_egm2008.parquet
+  lidar_root: J:/NZL_Lidar_DEM/3-Beach_Overlap_DEM_ModeRemoved_EGM2008(2018-2023)
+  output_dir: outputs/validation/nz_lidar_egm2008_overlap_v001
+  gedi_start_year: 2019
+  gedi_end_year: 2025
+  footprint_radius_m: 12.5
+  min_valid_lidar_cells: 250
+  plot_max_points: 25000
+  plot_seed: 42
+  batch_rows: 100000
+
 # 推荐的 MEOW-14 分区建模流程。区域 Shapefile 不随公开仓库提交，
 # 请从本项目“区域划分结果”文件夹复制到下列默认位置，或改为自己的绝对路径。
 regional_modeling:

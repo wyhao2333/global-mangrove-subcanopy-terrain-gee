@@ -68,6 +68,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "candidate_low_m": -20.0,
         "candidate_high_m": 50.0,
     },
+    "nz_lidar_validation": {
+        # 步骤 05c 只做本地外部一致性验证；不会修改输入 Parquet 或创建 GEE 任务。
+        "input_parquet": "data/mangrove_gedi_alphaearth_training_egm2008.parquet",
+        "lidar_root": "J:/NZL_Lidar_DEM/3-Beach_Overlap_DEM_ModeRemoved_EGM2008(2018-2023)",
+        "output_dir": "outputs/validation/nz_lidar_egm2008_overlap_v001",
+        "gedi_start_year": 2019,
+        "gedi_end_year": 2025,
+        "footprint_radius_m": 12.5,
+        "min_valid_lidar_cells": 250,
+        "plot_max_points": 25000,
+        "plot_seed": 42,
+        "batch_rows": 100000,
+    },
     "regional_modeling": {
         # 14 个项目建模区由 MEOW 232 个原始生态区归并而来；原始矢量不随代码仓库提交。
         "region_shp": "区域划分结果/coastal_belt_irregular_mangrove_regions_shapefile/coastal_belt_irregular_mangrove_regions.shp",
